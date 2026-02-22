@@ -1,0 +1,58 @@
+# OrdersForIncomeV1 — incremental sync via cursor pagination.
+# Single source of truth: docs/metrics/income_v1_contract.md
+#
+# Field mapping (shopMoney only; no FX; never mix currencies):
+#   lineItemsSubtotal     <- currentSubtotalPriceSet.shopMoney   (net of discounts in v1)
+#   shippingAmount        <- currentShippingPriceSet.shopMoney
+#   taxAmount              <- currentTotalTaxSet.shopMoney       (reported component; excluded from income)
+#   discountAmount         <- currentTotalDiscountsSet.shopMoney (breakdown/reconciliation only; do not subtract again)
+#   refund.amount         <- refund.totalRefundedSet.shopMoney
+
+query OrdersForIncomeV1($first: Int!, $after: String, $query: String) {
+  orders(first: $first, after: $after, query: $query, sortKey: PROCESSED_AT) {
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+    nodes {
+      id
+      processedAt
+      cancelledAt
+      test
+      currentSubtotalPriceSet {
+        shopMoney {
+          amount
+          currencyCode
+        }
+      }
+      currentShippingPriceSet {
+        shopMoney {
+          amount
+          currencyCode
+        }
+      }
+      currentTotalTaxSet {
+        shopMoney {
+          amount
+          currencyCode
+        }
+      }
+      currentTotalDiscountsSet {
+        shopMoney {
+          amount
+          currencyCode
+        }
+      }
+      refunds(first: 50) {
+        id
+        createdAt
+        totalRefundedSet {
+          shopMoney {
+            amount
+            currencyCode
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "id": "gid://shopify/Order/2",
+  "processedAt": "2024-01-15T12:00:00.000Z",
+  "cancelledAt": null,
+  "test": false,
+  "subtotalPriceSet": {
+    "shopMoney": { "amount": "900", "currencyCode": "MXN" },
+    "presentmentMoney": { "amount": "900", "currencyCode": "MXN" }
+  },
+  "totalShippingPriceSet": {
+    "shopMoney": { "amount": "100", "currencyCode": "MXN" },
+    "presentmentMoney": { "amount": "100", "currencyCode": "MXN" }
+  },
+  "totalTaxSet": {
+    "shopMoney": { "amount": "160", "currencyCode": "MXN" },
+    "presentmentMoney": { "amount": "160", "currencyCode": "MXN" }
+  },
+  "totalDiscountsSet": {
+    "shopMoney": { "amount": "100", "currencyCode": "MXN" },
+    "presentmentMoney": { "amount": "100", "currencyCode": "MXN" }
+  },
+  "refunds": []
+}
