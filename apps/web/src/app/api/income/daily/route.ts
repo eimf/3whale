@@ -1,7 +1,7 @@
 /**
- * BFF: proxies to backend GET /internal/income/daily?days=...
+ * BFF: proxies to backend GET /internal/income/daily-v2?days=...
+ * Returns daily series with MoneyValue { raw, display } for all money fields.
  * INTERNAL_API_KEY is server-only; never sent to the browser.
- * Single source of truth: docs/metrics/income_v1_contract.md
  */
 
 import { z } from "zod";
@@ -42,7 +42,7 @@ export async function GET(request: Request) {
     );
   }
 
-  const url = `${baseUrl.replace(/\/$/, "")}/internal/income/daily?days=${days}`;
+  const url = `${baseUrl.replace(/\/$/, "")}/internal/income/daily-v2?days=${days}`;
   const res = await fetch(url, {
     headers: {
       "x-internal-api-key": apiKey,

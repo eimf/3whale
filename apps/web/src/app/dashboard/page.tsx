@@ -19,6 +19,7 @@ import { setRangeDays, setSelectedDay, DASHBOARD_RANGE_DAYS } from "@/store/dash
 import type { RootState } from "@/store/store";
 import type { RangeDays } from "@/store/dashboardSlice";
 import { formatMoneyMXN } from "@/lib/formatMoneyMXN";
+import type { DailyPointV2, SummaryV2 } from "@/types/income";
 
 ChartJS.register(
   CategoryScale,
@@ -31,16 +32,6 @@ ChartJS.register(
   Tooltip
 );
 
-type DailyRow = {
-  date: string;
-  ordersCount?: number;
-  incomeBruto: string;
-  refunds: string;
-  incomeNeto: string;
-  shippingAmount?: string;
-  taxAmount?: string;
-  discountAmount?: string;
-};
 
 export default function DashboardPage() {
   const t = useTranslations();
@@ -48,7 +39,8 @@ export default function DashboardPage() {
   const rangeDays = useSelector((s: RootState) => s.dashboard.rangeDays);
   const selectedDay = useSelector((s: RootState) => s.dashboard.selectedDay);
 
-  const [data, setData] = useState<DailyRow[] | null>(null);
+  const [data, setData] = useState<DailyPointV2[] | null>(null);
+  const [summary, setSummary] = useState<SummaryV2 | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -60,13 +52,21 @@ export default function DashboardPage() {
         setError(null);
       }
     });
-    fetch(`/api/income/daily?days=${rangeDays}`)
-      .then((res) => {
+    Promise.all([
+      fetch(`/api/income/daily?days=${rangeDays}`).then((res) => {
         if (!res.ok) return res.json().then((b) => Promise.reject(b));
-        return res.json();
-      })
-      .then((json: DailyRow[]) => {
-        if (!cancelled) setData(Array.isArray(json) ? json : []);
+        return res.json() as Promise<DailyPointV2[]>;
+      }),
+      fetch(`/api/income/summary?days=${rangeDays}`).then((res) => {
+        if (!res.ok) return res.json().then((b) => Promise.reject(b));
+        return res.json() as Promise<SummaryV2>;
+      }),
+    ])
+      .then(([dailyJson, summaryJson]) => {
+        if (!cancelled) {
+          setData(Array.isArray(dailyJson) ? dailyJson : []);
+          setSummary(summaryJson);
+        }
       })
       .catch((err) => {
         if (!cancelled) setError(err?.error ?? String(err));
@@ -79,59 +79,21 @@ export default function DashboardPage() {
     };
   }, [rangeDays]);
 
-  // Period totals (sum over selected range) — so changing range changes the numbers
-  const periodTotals = useMemo(() => {
-    if (!data || data.length === 0)
-      return {
-        incomeBruto: "0",
-        refunds: "0",
-        incomeNeto: "0",
-        shippingAmount: "0",
-        totalOrders: 0,
-      };
-    let incomeBruto = 0;
-    let refunds = 0;
-    let incomeNeto = 0;
-    let shippingAmount = 0;
-    let totalOrders = 0;
-    for (const r of data) {
-      incomeBruto += Number(r.incomeBruto);
-      refunds += Number(r.refunds);
-      incomeNeto += Number(r.incomeNeto);
-      shippingAmount += Number(r.shippingAmount ?? "0");
-      totalOrders += r.ordersCount ?? 0;
-    }
-    return {
-      incomeBruto: String(incomeBruto),
-      refunds: String(refunds),
-      incomeNeto: String(incomeNeto),
-      shippingAmount: String(shippingAmount),
-      totalOrders,
-    };
-  }, [data]);
-
   const dateRangeLabel = useMemo(() => {
-    if (!data || data.length === 0) return "";
-    const first = data[0].date;
-    const last = data[data.length - 1].date;
-    return `${first} → ${last}`;
-  }, [data]);
+    if (!summary?.range) return "";
+    return `${summary.range.from} → ${summary.range.to}`;
+  }, [summary]);
 
+  // Display-only: profit margin from server summary (no client-side totals).
   const profitMarginPct = useMemo(() => {
-    const rev = Number(periodTotals.incomeBruto);
-    const net = Number(periodTotals.incomeNeto);
+    if (!summary) return null;
+    const rev = Number(summary.incomeBruto.display);
+    const net = Number(summary.incomeNeto.display);
     if (rev <= 0) return null;
     return ((net / rev) * 100).toFixed(1);
-  }, [periodTotals]);
+  }, [summary]);
 
-  const aov = useMemo(() => {
-    const rev = Number(periodTotals.incomeBruto);
-    const orders = periodTotals.totalOrders;
-    if (orders <= 0) return null;
-    return (rev / orders).toFixed(0);
-  }, [periodTotals]);
-
-  // Chart: convert money strings to numbers for plotting only.
+  // Chart: plot from .raw; string→number for visualization only (no client-side money calc).
   const chartData = useMemo(() => {
     if (!data || data.length === 0) return null;
     const labels = data.map((r) => r.date);
@@ -140,21 +102,21 @@ export default function DashboardPage() {
       datasets: [
         {
           label: t("metrics.incomeNeto"),
-          data: data.map((r) => Number(r.incomeNeto)),
+          data: data.map((r) => Number(r.incomeNeto.raw)),
           borderColor: "rgb(34, 197, 94)",
           backgroundColor: "rgba(34, 197, 94, 0.1)",
           fill: true,
         },
         {
           label: t("metrics.incomeBruto"),
-          data: data.map((r) => Number(r.incomeBruto)),
+          data: data.map((r) => Number(r.incomeBruto.raw)),
           borderColor: "rgb(59, 130, 246)",
           backgroundColor: "rgba(59, 130, 246, 0.1)",
           fill: true,
         },
         {
           label: t("metrics.refunds"),
-          data: data.map((r) => Number(r.refunds)),
+          data: data.map((r) => Number(r.refunds.raw)),
           borderColor: "rgb(239, 68, 68)",
           backgroundColor: "rgba(239, 68, 68, 0.1)",
           fill: true,
@@ -166,7 +128,7 @@ export default function DashboardPage() {
   const revenueChartData = useMemo(() => {
     if (!data || data.length === 0) return null;
     const labels = data.map((r) => r.date.slice(5));
-    const rev = data.map((r) => Number(r.incomeBruto));
+    const rev = data.map((r) => Number(r.incomeBruto.raw));
     return {
       labels,
       datasets: [
@@ -188,7 +150,7 @@ export default function DashboardPage() {
   const netProfitChartData = useMemo(() => {
     if (!data || data.length === 0) return null;
     const labels = data.map((r) => r.date.slice(5));
-    const net = data.map((r) => Number(r.incomeNeto));
+    const net = data.map((r) => Number(r.incomeNeto.raw));
     return {
       labels,
       datasets: [
@@ -228,7 +190,7 @@ export default function DashboardPage() {
       </div>
     );
   }
-  if (!data || data.length === 0) {
+  if (!data || !summary) {
     return (
       <div className="p-6 text-zinc-400">
         {t("state.noData")}
@@ -261,18 +223,18 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Metric cards: period totals from API (range changes the numbers) */}
+      {/* Metric cards: from summary API (MoneyValue.display); no client-side totals */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
         <div className="bg-zinc-800 rounded-lg p-4 border border-zinc-700">
           <div className="text-xs font-medium text-zinc-400 uppercase tracking-wider">{t("metrics.revenue")}</div>
           <div className="text-xl font-semibold text-zinc-100 mt-1">
-            {formatMoneyMXN(periodTotals.incomeBruto)} MXN
+            {formatMoneyMXN(summary.incomeBruto.display)} MXN
           </div>
         </div>
         <div className="bg-zinc-800 rounded-lg p-4 border border-zinc-700">
           <div className="text-xs font-medium text-zinc-400 uppercase tracking-wider">{t("metrics.returns")}</div>
           <div className="text-xl font-semibold text-zinc-100 mt-1">
-            {formatMoneyMXN(periodTotals.refunds)} MXN
+            {formatMoneyMXN(summary.refunds.display)} MXN
           </div>
         </div>
         <div className="bg-zinc-800 rounded-lg p-4 border border-zinc-700">
@@ -286,12 +248,12 @@ export default function DashboardPage() {
         <div className="bg-zinc-800 rounded-lg p-4 border border-zinc-700">
           <div className="text-xs font-medium text-zinc-400 uppercase tracking-wider">{t("metrics.shippingCost")}</div>
           <div className="text-xl font-semibold text-zinc-100 mt-1">
-            {formatMoneyMXN(periodTotals.shippingAmount)} MXN
+            {formatMoneyMXN(summary.shippingAmount.display)} MXN
           </div>
         </div>
         <div className="bg-zinc-800 rounded-lg p-4 border border-zinc-700">
           <div className="text-xs font-medium text-zinc-400 uppercase tracking-wider">{t("metrics.totalOrders")}</div>
-          <div className="text-xl font-semibold text-zinc-100 mt-1">{periodTotals.totalOrders.toLocaleString()}</div>
+          <div className="text-xl font-semibold text-zinc-100 mt-1">{summary.ordersIncluded.toLocaleString()}</div>
         </div>
         <div className="bg-zinc-800 rounded-lg p-4 border border-zinc-700">
           <div className="text-xs font-medium text-zinc-400 uppercase tracking-wider">{t("metrics.grossProfit")}</div>
@@ -300,7 +262,7 @@ export default function DashboardPage() {
         <div className="bg-zinc-800 rounded-lg p-4 border border-zinc-700">
           <div className="text-xs font-medium text-zinc-400 uppercase tracking-wider">{t("metrics.netProfit")}</div>
           <div className="text-xl font-semibold text-zinc-100 mt-1">
-            {formatMoneyMXN(periodTotals.incomeNeto)} MXN
+            {formatMoneyMXN(summary.incomeNeto.display)} MXN
           </div>
         </div>
         <div className="bg-zinc-800 rounded-lg p-4 border border-zinc-700">
@@ -316,7 +278,7 @@ export default function DashboardPage() {
         <div className="bg-zinc-800 rounded-lg p-4 border border-zinc-700">
           <div className="text-xs font-medium text-zinc-400 uppercase tracking-wider">{t("metrics.aov")}</div>
           <div className="text-xl font-semibold text-zinc-100 mt-1">
-            {aov != null ? `$${aov}` : "—"}
+            {summary.ordersIncluded > 0 ? `$${formatMoneyMXN(summary.aovNeto.display)}` : "—"}
           </div>
         </div>
         <div className="bg-zinc-800 rounded-lg p-4 border border-zinc-700">
