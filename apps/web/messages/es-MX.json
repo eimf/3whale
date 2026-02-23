@@ -1,0 +1,41 @@
+{
+  "dashboard": {
+    "title": "DASHBOARD",
+    "range": {
+      "label": "Rango",
+      "days": "Últimos {days} días",
+      "dropdown": "Últimos {days} días"
+    },
+    "incomeOverview": "Ingreso bruto, reembolsos y neto"
+  },
+  "metrics": {
+    "incomeBruto": "Ingreso bruto",
+    "refunds": "Reembolsos",
+    "incomeNeto": "Ingreso neto",
+    "revenue": "REVENUE",
+    "returns": "RETURNS",
+    "cogs": "COGS (PRODUCTO)",
+    "adSpend": "AD SPEND",
+    "shippingCost": "SHIPPING COST",
+    "totalOrders": "TOTAL ORDERS",
+    "grossProfit": "GROSS PROFIT",
+    "netProfit": "NET PROFIT",
+    "profitMargin": "PROFIT MARGIN",
+    "blendedRoas": "BLENDED ROAS",
+    "aov": "AOV",
+    "cac": "CAC",
+    "revenueVsAdSpend": "REVENUE VS AD SPEND",
+    "blendedRoasChart": "BLENDED ROAS",
+    "ordersPerDay": "ÓRDENES POR DÍA",
+    "netProfitChart": "NET PROFIT"
+  },
+  "drilldown": {
+    "selectDay": "Selecciona un día…",
+    "ordersForDay": "Órdenes del día {date}"
+  },
+  "state": {
+    "loading": "Cargando…",
+    "errorLoading": "Error al cargar datos",
+    "noData": "Sin datos"
+  }
+}

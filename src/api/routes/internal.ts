@@ -163,10 +163,11 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
       const startUtc = start.toUTC().toJSDate();
       const endUtc = end.toUTC().toJSDate();
 
-      // Group by local day (processedAt in shop tz), SUM components, excluded = false only.
+      // Group by local day (processedAt in shop tz), SUM components + order count, excluded = false only.
       const result = await db.execute(sql`
         SELECT
           day::text AS date,
+          COUNT(*)::int AS orders_count,
           SUM(income_bruto)::text AS income_bruto,
           SUM(refunds)::text AS refunds,
           SUM(income_neto)::text AS income_neto,
@@ -194,6 +195,7 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
 
       const results = rows.map((r) => ({
         date: String(r.date ?? ""),
+        ordersCount: Number(r.orders_count ?? 0),
         incomeBruto: String(r.income_bruto ?? "0"),
         refunds: String(r.refunds ?? "0"),
         incomeNeto: String(r.income_neto ?? "0"),

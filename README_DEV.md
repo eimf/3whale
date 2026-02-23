@@ -4,14 +4,14 @@ Single-store Shopify → Postgres sync for income v1. Single source of truth: `d
 
 ## Stack
 
-Node.js, TypeScript, Fastify, Drizzle + Postgres, BullMQ + Redis, zod, luxon, pino.
+Node.js, TypeScript, Fastify, Drizzle + Postgres, BullMQ + Redis, zod, luxon, pino. Web: Next.js (App Router) in `apps/web`.
 
 ## Prerequisites
 
 - Node.js 18+
 - Docker (for Postgres + Redis)
 
-## Commands
+## Backend
 
 ```bash
 # 1. Start infra (Postgres 16, Redis 7)
@@ -32,6 +32,22 @@ npm run dev:api
 # 5. Terminal 2: start worker
 npm run dev:worker
 ```
+
+## Web frontend (apps/web)
+
+```bash
+cd apps/web
+npm install
+# Create .env.local with INTERNAL_API_BASE_URL (e.g. http://localhost:3000) and INTERNAL_API_KEY
+npm run dev
+```
+
+- Dev server: **http://localhost:3001**
+- Dashboard: **http://localhost:3001/dashboard**
+
+**Vercel deployment:** Set environment variables in the project:
+- `INTERNAL_API_BASE_URL` – URL of the deployed backend API (e.g. `https://your-api.vercel.app`).
+- `INTERNAL_API_KEY` – set as a **secret**; never exposed to the browser. The BFF route `/api/income/daily` proxies to the backend with this key server-side only.
 
 ## Test locally (quick run)
 
