@@ -19,7 +19,7 @@ import { setRangeDays, setSelectedDay, DASHBOARD_RANGE_DAYS } from "@/store/dash
 import type { RootState } from "@/store/store";
 import type { RangeDays } from "@/store/dashboardSlice";
 import { formatMoneyMXN } from "@/lib/formatMoneyMXN";
-import type { DailyPointV2, SummaryV2 } from "@/types/income";
+import type { DailyPointV2, SummaryV2, SyncStatusResponse } from "@/types/income";
 
 ChartJS.register(
   CategoryScale,
@@ -43,6 +43,9 @@ export default function DashboardPage() {
   const [summary, setSummary] = useState<SummaryV2 | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [syncStatus, setSyncStatus] = useState<SyncStatusResponse | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -61,11 +64,16 @@ export default function DashboardPage() {
         if (!res.ok) return res.json().then((b) => Promise.reject(b));
         return res.json() as Promise<SummaryV2>;
       }),
+      fetch("/api/sync/status").then((res) => {
+        if (!res.ok) return null;
+        return res.json() as Promise<SyncStatusResponse>;
+      }),
     ])
-      .then(([dailyJson, summaryJson]) => {
+      .then(([dailyJson, summaryJson, syncJson]) => {
         if (!cancelled) {
           setData(Array.isArray(dailyJson) ? dailyJson : []);
           setSummary(summaryJson);
+          if (syncJson) setSyncStatus(syncJson);
         }
       })
       .catch((err) => {
@@ -83,6 +91,46 @@ export default function DashboardPage() {
     if (!summary?.range) return "";
     return `${summary.range.from} → ${summary.range.to}`;
   }, [summary]);
+
+  const lastSyncLabel = useMemo(() => {
+    if (!syncStatus?.syncState?.lastSyncFinishedAt) return t("sync.lastSyncedNever");
+    const date = new Date(syncStatus.syncState.lastSyncFinishedAt);
+    return date.toLocaleString(undefined, {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  }, [syncStatus, t]);
+
+  async function handleSyncNow() {
+    setSyncing(true);
+    setSyncMessage(null);
+    try {
+      const res = await fetch("/api/sync/run", { method: "POST" });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setSyncMessage(body?.error ?? "Error");
+        return;
+      }
+      setSyncMessage(t("sync.syncStarted"));
+      setTimeout(() => {
+        fetch("/api/sync/status")
+          .then((r) => (r.ok ? r.json() : null))
+          .then((s: SyncStatusResponse | null) => s && setSyncStatus(s));
+        fetch(`/api/income/daily?days=${rangeDays}`)
+          .then((r) => (r.ok ? r.json() : []))
+          .then((d) => setData(Array.isArray(d) ? d : []));
+        fetch(`/api/income/summary?days=${rangeDays}`)
+          .then((r) => (r.ok ? r.json() : null))
+          .then((s) => s && setSummary(s));
+        setSyncMessage(null);
+      }, 4000);
+    } finally {
+      setSyncing(false);
+    }
+  }
 
   // Display-only: profit margin from server summary (no client-side totals).
   const profitMarginPct = useMemo(() => {
@@ -200,7 +248,7 @@ export default function DashboardPage() {
 
   return (
     <div className="p-6 space-y-6">
-      {/* Header: title left, range + date right (wireframe) */}
+      {/* Header: title left, range + date right */}
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold text-zinc-100 tracking-wide">
@@ -222,13 +270,30 @@ export default function DashboardPage() {
           <span className="text-sm text-zinc-500">{dateRangeLabel}</span>
         </div>
       </div>
+      {/* Sync: last synced + Sync now button */}
+      <div className="flex flex-wrap items-center gap-3 text-sm">
+        <span className="text-zinc-500">
+          {t("sync.lastSynced")}: <span className="text-zinc-400">{lastSyncLabel}</span>
+        </span>
+        <button
+          type="button"
+          onClick={handleSyncNow}
+          disabled={syncing}
+          className="bg-zinc-700 hover:bg-zinc-600 disabled:opacity-50 disabled:cursor-not-allowed border border-zinc-600 rounded px-3 py-1.5 text-zinc-200 text-sm focus:outline-none focus:ring-1 focus:ring-emerald-500"
+        >
+          {syncing ? t("sync.syncing") : t("sync.syncNow")}
+        </button>
+        {syncMessage && (
+          <span className="text-emerald-400 text-sm">{syncMessage}</span>
+        )}
+      </div>
 
       {/* Metric cards: from summary API (MoneyValue.display); no client-side totals */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
         <div className="bg-zinc-800 rounded-lg p-4 border border-zinc-700">
-          <div className="text-xs font-medium text-zinc-400 uppercase tracking-wider">{t("metrics.revenue")}</div>
+          <div className="text-xs font-medium text-zinc-400 uppercase tracking-wider">{t("metrics.orderRevenue")}</div>
           <div className="text-xl font-semibold text-zinc-100 mt-1">
-            {formatMoneyMXN(summary.incomeBruto.display)} MXN
+            {formatMoneyMXN(summary.incomeNeto.display)} MXN
           </div>
         </div>
         <div className="bg-zinc-800 rounded-lg p-4 border border-zinc-700">

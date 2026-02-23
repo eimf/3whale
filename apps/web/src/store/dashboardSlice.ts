@@ -9,7 +9,7 @@ export interface DashboardState {
 }
 
 const initialState: DashboardState = {
-  rangeDays: 30,
+  rangeDays: 1,
   selectedDay: null,
 };
 
