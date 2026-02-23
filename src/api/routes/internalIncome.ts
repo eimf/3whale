@@ -183,7 +183,15 @@ export async function registerInternalIncomeRoutes(fastify: FastifyInstance) {
       includeExcluded: q.includeExcluded,
     });
     return reply.send({
-      range: { from: q.from, to: q.to, timezone: tz },
+      range: {
+        from: q.from,
+        to: q.to,
+        timezone: tz,
+        window_utc: {
+          start: range.startUtc.toISOString(),
+          end: range.endUtc.toISOString(),
+        },
+      },
       totals: result.totals,
       counts: result.counts,
       qualitySignals: result.qualitySignals,

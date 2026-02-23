@@ -29,3 +29,11 @@ export type SummaryV2 = {
   ordersExcludedInRange: number;
   aovNeto: MoneyValue;
 };
+
+export type SyncStatusResponse = {
+  syncState: {
+    lastSyncFinishedAt: string | null;
+    lastSyncStatus: string | null;
+    lastSyncStartedAt: string | null;
+  } | null;
+};

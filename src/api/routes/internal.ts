@@ -298,6 +298,10 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
       .optional()
       .default("false")
       .transform((v) => v === "true" || v === "1"),
+    debug: z
+      .string()
+      .optional()
+      .transform((v) => v === "1" || v === "true"),
   });
 
   /** Summary v2: totals + aovNeto as MoneyValue. Use ?days= or ?from=&to= (same filtering/timezone as v1). */
@@ -372,7 +376,7 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
           ? new Decimal(incomeNetoStr).div(ordersIncluded).toFixed(6)
           : "0.000000";
 
-      return reply.send({
+      const payload: Record<string, unknown> = {
         range: { from, to, timezone: tz },
         currencyCode: s.currencyCode,
         incomeBruto: toMoneyValue(s.incomeBruto),
@@ -384,7 +388,14 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
         ordersIncluded: s.ordersIncluded,
         ordersExcludedInRange: s.ordersExcludedInRange,
         aovNeto: toMoneyValue(aovNetoStr),
-      });
+      };
+      if (q.debug) {
+        payload.window_utc = {
+          start: startUtc.toISOString(),
+          end: endUtc.toISOString(),
+        };
+      }
+      return reply.send(payload);
     }
   );
 }
