@@ -20,6 +20,106 @@ import type { RootState } from "@/store/store";
 import type { RangeDays } from "@/store/dashboardSlice";
 import { formatMoneyMXN } from "@/lib/formatMoneyMXN";
 import type { DailyPointV2, SummaryV2, SyncStatusResponse } from "@/types/income";
+import {
+  MetricDrilldownDialog,
+  type DashboardMetricKey,
+  type SummaryItem,
+} from "@/components/dashboard/MetricDrilldownDialog";
+import type { BarSeriesPoint } from "@/components/dashboard/MetricBarsChart";
+import { ShoppingBagIcon } from "@/components/dashboard/ShoppingBagIcon";
+import { TileSparkline } from "@/components/dashboard/TileSparkline";
+
+/**
+ * Pre-flight discovery (metric drilldown):
+ * - KPI tiles: this page, grid at "Metric cards" (grid grid-cols-1 sm:grid-cols-2 ...).
+ * - Metric values: local state `data` (DailyPointV2[]) and `summary` (SummaryV2) from
+ *   /api/income/daily and /api/income/summary. Redux only has rangeDays/selectedDay.
+ * - Bar/timeseries: same `data` (DailyPointV2[]). Revenue/Net Profit/Orders charts use
+ *   chartData, revenueChartData, ordersPerDayData, netProfitChartData (all from data).
+ *   Bar-series shape: labels = date (r.date.slice(5)), values from .raw (number for viz only).
+ */
+function getBarsSeriesForMetric(
+  metricKey: DashboardMetricKey,
+  data: DailyPointV2[] | null
+): BarSeriesPoint[] | undefined {
+  if (!data || data.length === 0) return undefined;
+  if (metricKey === "orderRevenue" || metricKey === "netProfit") {
+    return data.map((r) => ({ x: r.date.slice(5), y: Number(r.incomeNeto.raw) }));
+  }
+  if (metricKey === "returns") {
+    return data.map((r) => ({ x: r.date.slice(5), y: Number(r.refunds.raw) }));
+  }
+  if (metricKey === "shippingCost") {
+    return data.map((r) => ({ x: r.date.slice(5), y: Number(r.shippingAmount.raw) }));
+  }
+  if (metricKey === "totalOrders" || metricKey === "ordersOverZero") {
+    return data.map((r) => ({ x: r.date.slice(5), y: r.ordersCount ?? 0 }));
+  }
+  if (metricKey === "grossSales") {
+    return data.map((r) => ({ x: r.date.slice(5), y: Number(r.incomeBruto.raw) }));
+  }
+  if (metricKey === "taxes") {
+    return data.map((r) => ({ x: r.date.slice(5), y: Number(r.taxAmount.raw) }));
+  }
+  if (metricKey === "discounts") {
+    return data.map((r) => ({ x: r.date.slice(5), y: Number(r.discountAmount.raw) }));
+  }
+  return undefined;
+}
+
+/** Last 2 days summary for drilldown modal; display-only (backend .display / formatMoneyMXN). No client money calc. */
+function getSummaryItemsForMetric(
+  metricKey: DashboardMetricKey,
+  data: DailyPointV2[] | null
+): SummaryItem[] | undefined {
+  if (!data || data.length === 0) return undefined;
+  const slice = data.slice(-2);
+  if (slice.length === 0) return undefined;
+  const items: SummaryItem[] = [];
+  for (const r of slice) {
+    const label = r.date.slice(5);
+    let displayValue: string;
+    if (metricKey === "orderRevenue" || metricKey === "netProfit") {
+      displayValue = `${formatMoneyMXN(r.incomeNeto.display)} MXN`;
+    } else if (metricKey === "returns") {
+      displayValue = `${formatMoneyMXN(r.refunds.display)} MXN`;
+    } else if (metricKey === "shippingCost") {
+      displayValue = `${formatMoneyMXN(r.shippingAmount.display)} MXN`;
+    } else if (metricKey === "totalOrders" || metricKey === "ordersOverZero") {
+      displayValue = String(r.ordersCount ?? 0);
+    } else if (metricKey === "grossSales") {
+      displayValue = `${formatMoneyMXN(r.incomeBruto.display)} MXN`;
+    } else if (metricKey === "taxes") {
+      displayValue = `${formatMoneyMXN(r.taxAmount.display)} MXN`;
+    } else if (metricKey === "discounts") {
+      displayValue = `${formatMoneyMXN(r.discountAmount.display)} MXN`;
+    } else {
+      continue;
+    }
+    items.push({ label, displayValue });
+  }
+  return items.length > 0 ? items : undefined;
+}
+
+/** Sparkline values from daily data (number for viz only). Empty array = show flat line. */
+function getSparklineValues(
+  metricKey: DashboardMetricKey,
+  data: DailyPointV2[] | null
+): number[] {
+  if (!data || data.length === 0) return [];
+  if (metricKey === "orderRevenue" || metricKey === "netProfit") {
+    return data.map((r) => Number(r.incomeNeto.raw));
+  }
+  if (metricKey === "returns") return data.map((r) => Number(r.refunds.raw));
+  if (metricKey === "shippingCost") return data.map((r) => Number(r.shippingAmount.raw));
+  if (metricKey === "totalOrders" || metricKey === "ordersOverZero") {
+    return data.map((r) => r.ordersCount ?? 0);
+  }
+  if (metricKey === "grossSales") return data.map((r) => Number(r.incomeBruto.raw));
+  if (metricKey === "taxes") return data.map((r) => Number(r.taxAmount.raw));
+  if (metricKey === "discounts") return data.map((r) => Number(r.discountAmount.raw));
+  return [];
+}
 
 ChartJS.register(
   CategoryScale,
@@ -46,6 +146,9 @@ export default function DashboardPage() {
   const [syncStatus, setSyncStatus] = useState<SyncStatusResponse | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [drilldownOpen, setDrilldownOpen] = useState(false);
+  const [selectedMetricKey, setSelectedMetricKey] = useState<DashboardMetricKey>("orderRevenue");
+  const [selectedMetricTitle, setSelectedMetricTitle] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -224,6 +327,86 @@ export default function DashboardPage() {
 
   const barOptions = useMemo(() => ({ responsive: true }), []);
 
+  const drilldownBarsSeries = useMemo(
+    () => getBarsSeriesForMetric(selectedMetricKey, data),
+    [selectedMetricKey, data]
+  );
+
+  const drilldownSummaryItems = useMemo(
+    () => getSummaryItemsForMetric(selectedMetricKey, data),
+    [selectedMetricKey, data]
+  );
+
+  function openDrilldown(metricKey: DashboardMetricKey, title: string) {
+    setSelectedMetricKey(metricKey);
+    setSelectedMetricTitle(title);
+    setDrilldownOpen(true);
+  }
+
+  /** 15 metrics in screenshot order: icon + title + value + sparkline on every tile. */
+  const tileConfigs: { metricKey: DashboardMetricKey; titleKey: keyof typeof tileTitleKeys }[] = [
+    { metricKey: "orderRevenue", titleKey: "orderRevenue" },
+    { metricKey: "totalOrders", titleKey: "totalOrders" },
+    { metricKey: "returns", titleKey: "returns" },
+    { metricKey: "taxes", titleKey: "taxes" },
+    { metricKey: "trueAov", titleKey: "trueAov" },
+    { metricKey: "averageOrderValue", titleKey: "averageOrderValue" },
+    { metricKey: "newCustomers", titleKey: "newCustomers" },
+    { metricKey: "grossSales", titleKey: "grossSales" },
+    { metricKey: "returningCustomers", titleKey: "returningCustomers" },
+    { metricKey: "ordersOverZero", titleKey: "ordersOverZero" },
+    { metricKey: "newCustomerOrders", titleKey: "newCustomerOrders" },
+    { metricKey: "unitsSold", titleKey: "unitsSold" },
+    { metricKey: "newCustomerRevenue", titleKey: "newCustomerRevenue" },
+    { metricKey: "returningCustomerRevenue", titleKey: "returningCustomerRevenue" },
+    { metricKey: "discounts", titleKey: "discounts" },
+  ];
+  const tileTitleKeys = {
+    orderRevenue: "metrics.orderRevenue",
+    totalOrders: "metrics.totalOrders",
+    returns: "metrics.returns",
+    taxes: "metrics.taxes",
+    trueAov: "metrics.trueAov",
+    averageOrderValue: "metrics.averageOrderValue",
+    newCustomers: "metrics.newCustomers",
+    grossSales: "metrics.grossSales",
+    returningCustomers: "metrics.returningCustomers",
+    ordersOverZero: "metrics.ordersOverZero",
+    newCustomerOrders: "metrics.newCustomerOrders",
+    unitsSold: "metrics.unitsSold",
+    newCustomerRevenue: "metrics.newCustomerRevenue",
+    returningCustomerRevenue: "metrics.returningCustomerRevenue",
+    discounts: "metrics.discounts",
+  } as const;
+
+  function getTileValue(metricKey: DashboardMetricKey): string {
+    if (!summary) return "—";
+    switch (metricKey) {
+      case "orderRevenue":
+      case "netProfit":
+        return `${formatMoneyMXN(summary.incomeNeto.display)} MXN`;
+      case "returns":
+        return `${formatMoneyMXN(summary.refunds.display)} MXN`;
+      case "taxes":
+        return `${formatMoneyMXN(summary.taxAmount.display)} MXN`;
+      case "trueAov":
+      case "averageOrderValue":
+      case "aov":
+        return summary.ordersIncluded > 0 ? `$${formatMoneyMXN(summary.aovNeto.display)}` : "—";
+      case "totalOrders":
+      case "ordersOverZero":
+        return summary.ordersIncluded.toLocaleString();
+      case "grossSales":
+        return `${formatMoneyMXN(summary.incomeBruto.display)} MXN`;
+      case "shippingCost":
+        return `${formatMoneyMXN(summary.shippingAmount.display)} MXN`;
+      case "discounts":
+        return `${formatMoneyMXN(summary.discountAmount.display)} MXN`;
+      default:
+        return "—";
+    }
+  }
+
   if (loading) {
     return (
       <div className="p-6 text-zinc-400">
@@ -288,69 +471,40 @@ export default function DashboardPage() {
         )}
       </div>
 
-      {/* Metric cards: from summary API (MoneyValue.display); no client-side totals */}
+      {/* Metric cards: 15 tiles from screenshot. Icon + title + value + sparkline; each opens drilldown. */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-        <div className="bg-zinc-800 rounded-lg p-4 border border-zinc-700">
-          <div className="text-xs font-medium text-zinc-400 uppercase tracking-wider">{t("metrics.orderRevenue")}</div>
-          <div className="text-xl font-semibold text-zinc-100 mt-1">
-            {formatMoneyMXN(summary.incomeNeto.display)} MXN
-          </div>
-        </div>
-        <div className="bg-zinc-800 rounded-lg p-4 border border-zinc-700">
-          <div className="text-xs font-medium text-zinc-400 uppercase tracking-wider">{t("metrics.returns")}</div>
-          <div className="text-xl font-semibold text-zinc-100 mt-1">
-            {formatMoneyMXN(summary.refunds.display)} MXN
-          </div>
-        </div>
-        <div className="bg-zinc-800 rounded-lg p-4 border border-zinc-700">
-          <div className="text-xs font-medium text-zinc-400 uppercase tracking-wider">{t("metrics.cogs")}</div>
-          <div className="text-xl font-semibold text-zinc-100 mt-1">—</div>
-        </div>
-        <div className="bg-zinc-800 rounded-lg p-4 border border-zinc-700">
-          <div className="text-xs font-medium text-zinc-400 uppercase tracking-wider">{t("metrics.adSpend")}</div>
-          <div className="text-xl font-semibold text-zinc-100 mt-1">—</div>
-        </div>
-        <div className="bg-zinc-800 rounded-lg p-4 border border-zinc-700">
-          <div className="text-xs font-medium text-zinc-400 uppercase tracking-wider">{t("metrics.shippingCost")}</div>
-          <div className="text-xl font-semibold text-zinc-100 mt-1">
-            {formatMoneyMXN(summary.shippingAmount.display)} MXN
-          </div>
-        </div>
-        <div className="bg-zinc-800 rounded-lg p-4 border border-zinc-700">
-          <div className="text-xs font-medium text-zinc-400 uppercase tracking-wider">{t("metrics.totalOrders")}</div>
-          <div className="text-xl font-semibold text-zinc-100 mt-1">{summary.ordersIncluded.toLocaleString()}</div>
-        </div>
-        <div className="bg-zinc-800 rounded-lg p-4 border border-zinc-700">
-          <div className="text-xs font-medium text-zinc-400 uppercase tracking-wider">{t("metrics.grossProfit")}</div>
-          <div className="text-xl font-semibold text-zinc-100 mt-1">—</div>
-        </div>
-        <div className="bg-zinc-800 rounded-lg p-4 border border-zinc-700">
-          <div className="text-xs font-medium text-zinc-400 uppercase tracking-wider">{t("metrics.netProfit")}</div>
-          <div className="text-xl font-semibold text-zinc-100 mt-1">
-            {formatMoneyMXN(summary.incomeNeto.display)} MXN
-          </div>
-        </div>
-        <div className="bg-zinc-800 rounded-lg p-4 border border-zinc-700">
-          <div className="text-xs font-medium text-zinc-400 uppercase tracking-wider">{t("metrics.profitMargin")}</div>
-          <div className="text-xl font-semibold text-zinc-100 mt-1">
-            {profitMarginPct != null ? `${profitMarginPct}%` : "—"}
-          </div>
-        </div>
-        <div className="bg-zinc-800 rounded-lg p-4 border border-zinc-700">
-          <div className="text-xs font-medium text-zinc-400 uppercase tracking-wider">{t("metrics.blendedRoas")}</div>
-          <div className="text-xl font-semibold text-zinc-100 mt-1">—</div>
-        </div>
-        <div className="bg-zinc-800 rounded-lg p-4 border border-zinc-700">
-          <div className="text-xs font-medium text-zinc-400 uppercase tracking-wider">{t("metrics.aov")}</div>
-          <div className="text-xl font-semibold text-zinc-100 mt-1">
-            {summary.ordersIncluded > 0 ? `$${formatMoneyMXN(summary.aovNeto.display)}` : "—"}
-          </div>
-        </div>
-        <div className="bg-zinc-800 rounded-lg p-4 border border-zinc-700">
-          <div className="text-xs font-medium text-zinc-400 uppercase tracking-wider">{t("metrics.cac")}</div>
-          <div className="text-xl font-semibold text-zinc-100 mt-1">—</div>
-        </div>
+        {tileConfigs.map((config) => {
+          const title = t(tileTitleKeys[config.titleKey]);
+          const value = getTileValue(config.metricKey);
+          const sparklineValues = getSparklineValues(config.metricKey, data);
+          return (
+            <button
+              key={config.metricKey}
+              type="button"
+              onClick={() => openDrilldown(config.metricKey, title)}
+              className="bg-zinc-800 rounded-lg p-4 border border-zinc-700 text-left w-full hover:bg-zinc-700/90 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-zinc-950 flex flex-col"
+            >
+              <div className="flex items-center gap-2">
+                <ShoppingBagIcon />
+                <span className="text-xs font-medium text-zinc-400 uppercase tracking-wider">{title}</span>
+              </div>
+              <div className="text-xl font-semibold text-zinc-100 mt-1">{value}</div>
+              <div className="mt-2 flex items-end justify-start min-h-[36px]">
+                <TileSparkline values={sparklineValues} />
+              </div>
+            </button>
+          );
+        })}
       </div>
+
+      <MetricDrilldownDialog
+        open={drilldownOpen}
+        onOpenChange={setDrilldownOpen}
+        metricKey={selectedMetricKey}
+        title={selectedMetricTitle}
+        barsSeries={drilldownBarsSeries}
+        summaryItems={drilldownSummaryItems}
+      />
 
       {/* Charts: all from API /api/income/daily */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
