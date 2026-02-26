@@ -3,19 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { useTranslations } from "next-intl";
-import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  BarElement,
-  Filler,
-  Legend,
-  Tooltip,
-} from "chart.js";
-import { Line, Bar } from "react-chartjs-2";
-import { setRangeDays, setSelectedDay, DASHBOARD_RANGE_DAYS } from "@/store/dashboardSlice";
+import { setRangeDays, DASHBOARD_RANGE_DAYS } from "@/store/dashboardSlice";
 import type { RootState } from "@/store/store";
 import type { RangeDays } from "@/store/dashboardSlice";
 import { formatMoneyMXN } from "@/lib/formatMoneyMXN";
@@ -28,6 +16,50 @@ import {
 import type { BarSeriesPoint } from "@/components/dashboard/MetricBarsChart";
 import { ShoppingBagIcon } from "@/components/dashboard/ShoppingBagIcon";
 import { TileSparkline } from "@/components/dashboard/TileSparkline";
+import { metricsMeta, TILE_METRIC_KEYS } from "@/lib/metricsMeta";
+import {
+  TooltipProvider,
+  TooltipRoot,
+  TooltipTrigger,
+  TooltipPortal,
+  TooltipContent,
+} from "@/components/ui/tooltip";
+
+function ShareIcon() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" />
+      <polyline points="16 6 12 2 8 6" />
+      <line x1="12" y1="2" x2="12" y2="15" />
+    </svg>
+  );
+}
+function KebabMenuIcon() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <circle cx="12" cy="12" r="1" />
+      <circle cx="12" cy="5" r="1" />
+      <circle cx="12" cy="19" r="1" />
+    </svg>
+  );
+}
+function FiltersIcon() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
+    </svg>
+  );
+}
+function GridIcon() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <rect width="7" height="7" x="3" y="3" rx="1" />
+      <rect width="7" height="7" x="14" y="3" rx="1" />
+      <rect width="7" height="7" x="14" y="14" rx="1" />
+      <rect width="7" height="7" x="3" y="14" rx="1" />
+    </svg>
+  );
+}
 
 /**
  * Pre-flight discovery (metric drilldown):
@@ -121,23 +153,10 @@ function getSparklineValues(
   return [];
 }
 
-ChartJS.register(
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  BarElement,
-  Filler,
-  Legend,
-  Tooltip
-);
-
-
 export default function DashboardPage() {
   const t = useTranslations();
   const dispatch = useDispatch();
   const rangeDays = useSelector((s: RootState) => s.dashboard.rangeDays);
-  const selectedDay = useSelector((s: RootState) => s.dashboard.selectedDay);
 
   const [data, setData] = useState<DailyPointV2[] | null>(null);
   const [summary, setSummary] = useState<SummaryV2 | null>(null);
@@ -235,98 +254,6 @@ export default function DashboardPage() {
     }
   }
 
-  // Display-only: profit margin from server summary (no client-side totals).
-  const profitMarginPct = useMemo(() => {
-    if (!summary) return null;
-    const rev = Number(summary.incomeBruto.display);
-    const net = Number(summary.incomeNeto.display);
-    if (rev <= 0) return null;
-    return ((net / rev) * 100).toFixed(1);
-  }, [summary]);
-
-  // Chart: plot from .raw; string→number for visualization only (no client-side money calc).
-  const chartData = useMemo(() => {
-    if (!data || data.length === 0) return null;
-    const labels = data.map((r) => r.date);
-    return {
-      labels,
-      datasets: [
-        {
-          label: t("metrics.incomeNeto"),
-          data: data.map((r) => Number(r.incomeNeto.raw)),
-          borderColor: "rgb(34, 197, 94)",
-          backgroundColor: "rgba(34, 197, 94, 0.1)",
-          fill: true,
-        },
-        {
-          label: t("metrics.incomeBruto"),
-          data: data.map((r) => Number(r.incomeBruto.raw)),
-          borderColor: "rgb(59, 130, 246)",
-          backgroundColor: "rgba(59, 130, 246, 0.1)",
-          fill: true,
-        },
-        {
-          label: t("metrics.refunds"),
-          data: data.map((r) => Number(r.refunds.raw)),
-          borderColor: "rgb(239, 68, 68)",
-          backgroundColor: "rgba(239, 68, 68, 0.1)",
-          fill: true,
-        },
-      ],
-    };
-  }, [data, t]);
-
-  const revenueChartData = useMemo(() => {
-    if (!data || data.length === 0) return null;
-    const labels = data.map((r) => r.date.slice(5));
-    const rev = data.map((r) => Number(r.incomeBruto.raw));
-    return {
-      labels,
-      datasets: [
-        { label: t("metrics.revenue"), data: rev, borderColor: "rgb(255,255,255)", backgroundColor: "rgba(255,255,255,0.1)", fill: true },
-      ],
-    };
-  }, [data, t]);
-
-  const ordersPerDayData = useMemo(() => {
-    if (!data || data.length === 0) return null;
-    const labels = data.map((r) => r.date.slice(5));
-    const counts = data.map((r) => r.ordersCount ?? 0);
-    return {
-      labels,
-      datasets: [{ label: t("metrics.ordersPerDay"), data: counts, backgroundColor: "rgba(113, 113, 122, 0.8)" }],
-    };
-  }, [data, t]);
-
-  const netProfitChartData = useMemo(() => {
-    if (!data || data.length === 0) return null;
-    const labels = data.map((r) => r.date.slice(5));
-    const net = data.map((r) => Number(r.incomeNeto.raw));
-    return {
-      labels,
-      datasets: [
-        { label: t("metrics.netProfitChart"), data: net, borderColor: "rgb(34, 197, 94)", backgroundColor: "rgba(34, 197, 94, 0.1)", fill: true },
-      ],
-    };
-  }, [data, t]);
-
-  const options = useMemo(
-    () => ({
-      responsive: true,
-      onClick: (_: unknown, elements: { index: number }[], chart: { config?: { data?: { labels?: unknown[] } } }) => {
-        if (elements.length === 0) return;
-        const idx = elements[0].index;
-        const label = chart?.config?.data?.labels?.[idx];
-        if (typeof label === "string" && /^\d{4}-\d{2}-\d{2}$/.test(label)) {
-          dispatch(setSelectedDay(label));
-        }
-      },
-    }),
-    [dispatch]
-  );
-
-  const barOptions = useMemo(() => ({ responsive: true }), []);
-
   const drilldownBarsSeries = useMemo(
     () => getBarsSeriesForMetric(selectedMetricKey, data),
     [selectedMetricKey, data]
@@ -343,41 +270,8 @@ export default function DashboardPage() {
     setDrilldownOpen(true);
   }
 
-  /** 15 metrics in screenshot order: icon + title + value + sparkline on every tile. */
-  const tileConfigs: { metricKey: DashboardMetricKey; titleKey: keyof typeof tileTitleKeys }[] = [
-    { metricKey: "orderRevenue", titleKey: "orderRevenue" },
-    { metricKey: "totalOrders", titleKey: "totalOrders" },
-    { metricKey: "returns", titleKey: "returns" },
-    { metricKey: "taxes", titleKey: "taxes" },
-    { metricKey: "trueAov", titleKey: "trueAov" },
-    { metricKey: "averageOrderValue", titleKey: "averageOrderValue" },
-    { metricKey: "newCustomers", titleKey: "newCustomers" },
-    { metricKey: "grossSales", titleKey: "grossSales" },
-    { metricKey: "returningCustomers", titleKey: "returningCustomers" },
-    { metricKey: "ordersOverZero", titleKey: "ordersOverZero" },
-    { metricKey: "newCustomerOrders", titleKey: "newCustomerOrders" },
-    { metricKey: "unitsSold", titleKey: "unitsSold" },
-    { metricKey: "newCustomerRevenue", titleKey: "newCustomerRevenue" },
-    { metricKey: "returningCustomerRevenue", titleKey: "returningCustomerRevenue" },
-    { metricKey: "discounts", titleKey: "discounts" },
-  ];
-  const tileTitleKeys = {
-    orderRevenue: "metrics.orderRevenue",
-    totalOrders: "metrics.totalOrders",
-    returns: "metrics.returns",
-    taxes: "metrics.taxes",
-    trueAov: "metrics.trueAov",
-    averageOrderValue: "metrics.averageOrderValue",
-    newCustomers: "metrics.newCustomers",
-    grossSales: "metrics.grossSales",
-    returningCustomers: "metrics.returningCustomers",
-    ordersOverZero: "metrics.ordersOverZero",
-    newCustomerOrders: "metrics.newCustomerOrders",
-    unitsSold: "metrics.unitsSold",
-    newCustomerRevenue: "metrics.newCustomerRevenue",
-    returningCustomerRevenue: "metrics.returningCustomerRevenue",
-    discounts: "metrics.discounts",
-  } as const;
+  /** 15 metrics: icon + title + value + sparkline; titles/tooltips from metricsMeta + i18n. */
+  const tileConfigs = TILE_METRIC_KEYS.map((metricKey) => ({ metricKey }));
 
   function getTileValue(metricKey: DashboardMetricKey): string {
     if (!summary) return "—";
@@ -471,12 +365,55 @@ export default function DashboardPage() {
         )}
       </div>
 
-      {/* Metric cards: 15 tiles from screenshot. Icon + title + value + sparkline; each opens drilldown. */}
+      {/* Tienda section: header + KPI tiles */}
+      <section className="space-y-3">
+        <div className="flex items-center justify-between gap-4">
+          <h2 className="flex items-center gap-2 text-lg font-semibold text-zinc-100">
+            <ShoppingBagIcon />
+            {t("dashboard.tienda")}
+          </h2>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              aria-label={t("tiendaHeader.share")}
+              className="rounded p-2 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-zinc-950"
+            >
+              <ShareIcon />
+            </button>
+            <button
+              type="button"
+              aria-label={t("tiendaHeader.menu")}
+              className="rounded p-2 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-zinc-950"
+            >
+              <KebabMenuIcon />
+            </button>
+            <button
+              type="button"
+              aria-label={t("tiendaHeader.filters")}
+              className="rounded p-2 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-zinc-950"
+            >
+              <FiltersIcon />
+            </button>
+            <button
+              type="button"
+              aria-label={t("tiendaHeader.grid")}
+              className="rounded p-2 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-zinc-950"
+            >
+              <GridIcon />
+            </button>
+          </div>
+        </div>
+
+        <TooltipProvider delayDuration={300}>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
         {tileConfigs.map((config) => {
-          const title = t(tileTitleKeys[config.titleKey]);
+          const meta = metricsMeta[config.metricKey];
+          const title = t(meta.titleKey);
           const value = getTileValue(config.metricKey);
           const sparklineValues = getSparklineValues(config.metricKey, data);
+          const description = t(meta.tooltipDescriptionKey);
+          const formula = meta.tooltipFormulaKey ? t(meta.tooltipFormulaKey) : null;
+          const note = meta.tooltipNoteKey ? t(meta.tooltipNoteKey) : null;
           return (
             <button
               key={config.metricKey}
@@ -486,7 +423,20 @@ export default function DashboardPage() {
             >
               <div className="flex items-center gap-2">
                 <ShoppingBagIcon />
-                <span className="text-xs font-medium text-zinc-400 uppercase tracking-wider">{title}</span>
+                <TooltipRoot>
+                  <TooltipTrigger asChild>
+                    <span className="text-xs font-medium text-zinc-400 uppercase tracking-wider cursor-help focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-1 rounded">
+                      {title}
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipPortal>
+                    <TooltipContent>
+                      <p>{description}</p>
+                      {formula && <p className="mt-1.5 text-zinc-400 font-mono text-xs">{formula}</p>}
+                      {note && <p className="mt-1 text-amber-200/90 text-xs">{note}</p>}
+                    </TooltipContent>
+                  </TooltipPortal>
+                </TooltipRoot>
               </div>
               <div className="text-xl font-semibold text-zinc-100 mt-1">{value}</div>
               <div className="mt-2 flex items-end justify-start min-h-[36px]">
@@ -496,6 +446,8 @@ export default function DashboardPage() {
           );
         })}
       </div>
+        </TooltipProvider>
+      </section>
 
       <MetricDrilldownDialog
         open={drilldownOpen}
@@ -505,38 +457,6 @@ export default function DashboardPage() {
         barsSeries={drilldownBarsSeries}
         summaryItems={drilldownSummaryItems}
       />
-
-      {/* Charts: all from API /api/income/daily */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="bg-zinc-800 rounded-lg p-4 border border-zinc-700 min-h-[280px]">
-          <h3 className="text-sm font-medium text-zinc-400 mb-2">{t("metrics.revenue")}</h3>
-          {revenueChartData && <Line data={revenueChartData} options={barOptions} />}
-        </div>
-        <div className="bg-zinc-800 rounded-lg p-4 border border-zinc-700 min-h-[280px]">
-          <h3 className="text-sm font-medium text-zinc-400 mb-2">{t("metrics.netProfitChart")}</h3>
-          {netProfitChartData && <Line data={netProfitChartData} options={barOptions} />}
-        </div>
-        <div className="bg-zinc-800 rounded-lg p-4 border border-zinc-700 min-h-[280px]">
-          <h3 className="text-sm font-medium text-zinc-400 mb-2">{t("metrics.ordersPerDay")}</h3>
-          {ordersPerDayData && <Bar data={ordersPerDayData} options={barOptions} />}
-        </div>
-        <div className="bg-zinc-800 rounded-lg p-4 border border-zinc-700 min-h-[280px]">
-          <h3 className="text-sm font-medium text-zinc-400 mb-2">{t("dashboard.incomeOverview")}</h3>
-          {chartData && <Line data={chartData} options={options} />}
-        </div>
-      </div>
-
-      <div className="bg-zinc-800 rounded-lg p-4 border border-zinc-700">
-        <h2 className="text-sm font-medium text-zinc-400 mb-2">{t("drilldown.selectDay")}</h2>
-        {selectedDay ? (
-          <p className="text-zinc-200">
-            {t("drilldown.ordersForDay", { date: selectedDay })}
-            <span className="ml-2 text-zinc-500">(Próximamente: listado de órdenes)</span>
-          </p>
-        ) : (
-          <p className="text-zinc-500">Selecciona un día en la gráfica para ver el detalle.</p>
-        )}
-      </div>
     </div>
   );
 }
