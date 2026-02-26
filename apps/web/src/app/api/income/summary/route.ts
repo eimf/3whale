@@ -8,14 +8,17 @@
 import { z } from "zod";
 import { NextResponse } from "next/server";
 
-const allowedDays = [1, 2, 3, 7, 30] as const;
+const allowedDays = [1, 2, 3, 7, 14, 30, 90, 365] as const;
 const daysSchema = z
   .union([
     z.literal(1),
     z.literal(2),
     z.literal(3),
     z.literal(7),
+    z.literal(14),
     z.literal(30),
+    z.literal(90),
+    z.literal(365),
   ])
   .optional();
 
@@ -42,7 +45,7 @@ export async function GET(request: Request) {
 
   if (!hasDays && !hasFromTo) {
     return NextResponse.json(
-      { error: "Provide either days (1|2|3|7|30) or both from and to (YYYY-MM-DD)" },
+      { error: "Provide either days (1|2|3|7|14|30|90|365) or both from and to (YYYY-MM-DD)" },
       { status: 400 }
     );
   }
@@ -73,6 +76,10 @@ export async function GET(request: Request) {
   }
   if (includeExcludedParam !== null && includeExcludedParam !== "")
     query.set("includeExcluded", includeExcludedParam);
+  const compareParam = searchParams.get("compare");
+  if (compareParam === "1" || compareParam === "true") {
+    query.set("compare", "1");
+  }
 
   const url = `${baseUrl.replace(/\/$/, "")}/internal/income/summary-v2?${query.toString()}`;
   const res = await fetch(url, {

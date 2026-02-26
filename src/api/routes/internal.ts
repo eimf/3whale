@@ -23,7 +23,7 @@ import { parseLocalDateRangeToUtc } from "../../services/dateRange.js";
 
 const INTERNAL_API_KEY = process.env.INTERNAL_API_KEY?.trim() ?? "";
 
-const allowedDays = [1, 2, 3, 7, 30] as const;
+const allowedDays = [1, 2, 3, 7, 14, 30, 90, 365] as const;
 const daysSchema = z
   .number()
   .int()
@@ -211,20 +211,34 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
     }
   );
 
-  /** Daily income series v2: same as daily but every money field is MoneyValue { raw, display }. */
-  fastify.get<{ Querystring: { days?: string } }>(
+  /** Daily income series v2: same as daily but every money field is MoneyValue { raw, display }.
+   * Query: days= or from=&to= (like summary-v2). Optional granularity=hour|day (default: hour if range ≤2 days, else day).
+   * Optional compare=1 returns comparison series for the immediately preceding period of same length. */
+  fastify.get<{ Querystring: Record<string, string | undefined> }>(
     "/internal/income/daily-v2",
     async (req, reply) => {
-      const rawDays = req.query.days;
-      const parsed = daysSchema.safeParse(
-        rawDays === undefined ? 7 : Number(rawDays)
-      );
+      const dailyV2Schema = z.object({
+        days: z.coerce
+          .number()
+          .int()
+          .refine((n) => (allowedDays as readonly number[]).includes(n))
+          .optional(),
+        from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+        to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+        granularity: z.enum(["hour", "day"]).optional(),
+        compare: z
+          .string()
+          .optional()
+          .transform((v) => v === "1" || v === "true"),
+      });
+      const parsed = dailyV2Schema.safeParse(req.query);
       if (!parsed.success) {
         return reply.code(400).send({
-          error: parsed.error.errors[0]?.message ?? `days must be one of: ${allowedDays.join(", ")}`,
+          error: "Invalid query",
+          details: parsed.error.flatten(),
         });
       }
-      const days = parsed.data;
+      const q = parsed.data;
 
       const [config] = await db
         .select()
@@ -237,51 +251,173 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
         });
       }
       const tz = config.timezoneIana;
-      const end = DateTime.now().setZone(tz);
-      const start = end.startOf("day").minus({ days: days - 1 });
-      const startUtc = start.toUTC().toJSDate();
-      const endUtc = end.toUTC().toJSDate();
 
-      const result = await db.execute(sql`
-        SELECT
-          day::text AS date,
-          COUNT(*)::int AS orders_count,
-          SUM(income_bruto)::text AS income_bruto,
-          SUM(refunds)::text AS refunds,
-          SUM(income_neto)::text AS income_neto,
-          SUM(shipping_amount)::text AS shipping_amount,
-          SUM(tax_amount)::text AS tax_amount,
-          SUM(discount_amount)::text AS discount_amount
-        FROM (
+      let startUtc: Date;
+      let endUtc: Date;
+      let from: string;
+      let to: string;
+
+      if (q.days !== undefined) {
+        const end = DateTime.now().setZone(tz);
+        const start = end.startOf("day").minus({ days: q.days - 1 });
+        startUtc = start.toUTC().toJSDate();
+        endUtc = end.toUTC().toJSDate();
+        from = start.toISODate() ?? "";
+        to = end.toISODate() ?? "";
+      } else if (q.from !== undefined && q.to !== undefined) {
+        try {
+          const range = parseLocalDateRangeToUtc(q.from, q.to, tz);
+          startUtc = range.startUtc;
+          endUtc = range.endUtc;
+          from = q.from;
+          to = q.to;
+        } catch (e) {
+          return reply.code(400).send({
+            error: e instanceof Error ? e.message : "Invalid date range",
+          });
+        }
+      } else {
+        return reply.code(400).send({
+          error: "Provide either days or both from and to",
+        });
+      }
+
+      const startLocal = DateTime.fromJSDate(startUtc).setZone(tz);
+      const endLocal = DateTime.fromJSDate(endUtc).setZone(tz);
+      const rangeDays = Math.ceil(endLocal.diff(startLocal, "days").days) + 1;
+      const useHour = rangeDays <= 2;
+      const granularity = q.granularity ?? (useHour ? "hour" : "day");
+
+      async function runDailyAgg(
+        sUtc: Date,
+        eUtc: Date
+      ): Promise<Array<{
+        date: string;
+        ordersCount: number;
+        incomeBruto: ReturnType<typeof toMoneyValue>;
+        refunds: ReturnType<typeof toMoneyValue>;
+        incomeNeto: ReturnType<typeof toMoneyValue>;
+        shippingAmount: ReturnType<typeof toMoneyValue>;
+        taxAmount: ReturnType<typeof toMoneyValue>;
+        discountAmount: ReturnType<typeof toMoneyValue>;
+      }>> {
+        if (granularity === "hour") {
+          const result = await db.execute(sql`
+            SELECT
+              bucket::text AS date,
+              COUNT(*)::int AS orders_count,
+              SUM(income_bruto)::text AS income_bruto,
+              SUM(refunds)::text AS refunds,
+              SUM(income_neto)::text AS income_neto,
+              SUM(shipping_amount)::text AS shipping_amount,
+              SUM(tax_amount)::text AS tax_amount,
+              SUM(discount_amount)::text AS discount_amount
+            FROM (
+              SELECT
+                date_trunc('hour', (processed_at AT TIME ZONE ${tz}))::timestamptz AT TIME ZONE ${tz} AS bucket,
+                income_bruto,
+                refunds,
+                income_neto,
+                shipping_amount,
+                tax_amount,
+                discount_amount
+              FROM order_income_v1
+              WHERE excluded = false
+                AND processed_at >= ${sUtc}
+                AND processed_at <= ${eUtc}
+            ) sub
+            GROUP BY bucket
+            ORDER BY bucket ASC
+          `);
+          const rows = (result as { rows: Record<string, unknown>[] }).rows ?? [];
+          return rows.map((r) => {
+            const raw = String(r.date ?? "");
+            const d = raw.includes("T")
+              ? raw.slice(0, 13) + ":00:00"
+              : raw.replace(" ", "T").slice(0, 19) || raw + "T00:00:00";
+            return {
+              date: d,
+              ordersCount: Number(r.orders_count ?? 0),
+              incomeBruto: toMoneyValue(String(r.income_bruto ?? "0")),
+              refunds: toMoneyValue(String(r.refunds ?? "0")),
+              incomeNeto: toMoneyValue(String(r.income_neto ?? "0")),
+              shippingAmount: toMoneyValue(String(r.shipping_amount ?? "0")),
+              taxAmount: toMoneyValue(String(r.tax_amount ?? "0")),
+              discountAmount: toMoneyValue(String(r.discount_amount ?? "0")),
+            };
+          });
+        }
+        const result = await db.execute(sql`
           SELECT
-            (processed_at AT TIME ZONE ${tz})::date AS day,
-            income_bruto,
-            refunds,
-            income_neto,
-            shipping_amount,
-            tax_amount,
-            discount_amount
-          FROM order_income_v1
-          WHERE excluded = false
-            AND processed_at >= ${startUtc}
-            AND processed_at <= ${endUtc}
-        ) sub
-        GROUP BY day
-        ORDER BY day ASC
-      `);
-      const rows = (result as { rows: Record<string, unknown>[] }).rows ?? [];
+            day::text AS date,
+            COUNT(*)::int AS orders_count,
+            SUM(income_bruto)::text AS income_bruto,
+            SUM(refunds)::text AS refunds,
+            SUM(income_neto)::text AS income_neto,
+            SUM(shipping_amount)::text AS shipping_amount,
+            SUM(tax_amount)::text AS tax_amount,
+            SUM(discount_amount)::text AS discount_amount
+          FROM (
+            SELECT
+              (processed_at AT TIME ZONE ${tz})::date AS day,
+              income_bruto,
+              refunds,
+              income_neto,
+              shipping_amount,
+              tax_amount,
+              discount_amount
+            FROM order_income_v1
+            WHERE excluded = false
+              AND processed_at >= ${sUtc}
+              AND processed_at <= ${eUtc}
+          ) sub
+          GROUP BY day
+          ORDER BY day ASC
+        `);
+        const rows = (result as { rows: Record<string, unknown>[] }).rows ?? [];
+        return rows.map((r) => ({
+          date: String(r.date ?? ""),
+          ordersCount: Number(r.orders_count ?? 0),
+          incomeBruto: toMoneyValue(String(r.income_bruto ?? "0")),
+          refunds: toMoneyValue(String(r.refunds ?? "0")),
+          incomeNeto: toMoneyValue(String(r.income_neto ?? "0")),
+          shippingAmount: toMoneyValue(String(r.shipping_amount ?? "0")),
+          taxAmount: toMoneyValue(String(r.tax_amount ?? "0")),
+          discountAmount: toMoneyValue(String(r.discount_amount ?? "0")),
+        }));
+      }
 
-      const results = rows.map((r) => ({
-        date: String(r.date ?? ""),
-        ordersCount: Number(r.orders_count ?? 0),
-        incomeBruto: toMoneyValue(String(r.income_bruto ?? "0")),
-        refunds: toMoneyValue(String(r.refunds ?? "0")),
-        incomeNeto: toMoneyValue(String(r.income_neto ?? "0")),
-        shippingAmount: toMoneyValue(String(r.shipping_amount ?? "0")),
-        taxAmount: toMoneyValue(String(r.tax_amount ?? "0")),
-        discountAmount: toMoneyValue(String(r.discount_amount ?? "0")),
-      }));
-      return reply.send(results);
+      const results = await runDailyAgg(startUtc, endUtc);
+
+      const payload: Record<string, unknown> = {
+        range: { from, to, timezone: tz },
+        granularity,
+        data: results,
+      };
+
+      if (q.compare) {
+        const startDt = DateTime.fromISO(from, { zone: tz }).startOf("day");
+        const endDt = DateTime.fromISO(to, { zone: tz }).startOf("day");
+        const spanDays = Math.ceil(endDt.diff(startDt, "days").days) + 1;
+        const endPrev = startDt.minus({ days: 1 });
+        const startPrev = endPrev.minus({ days: spanDays - 1 });
+        const fromPrev = startPrev.toISODate() ?? "";
+        const toPrev = endPrev.toISODate() ?? "";
+        try {
+          const rangePrev = parseLocalDateRangeToUtc(fromPrev, toPrev, tz);
+          const comparisonResults = await runDailyAgg(
+            rangePrev.startUtc,
+            rangePrev.endUtc
+          );
+          payload.comparisonRange = { from: fromPrev, to: toPrev };
+          payload.comparison = comparisonResults;
+        } catch {
+          payload.comparisonRange = { from: fromPrev, to: toPrev };
+          payload.comparison = [];
+        }
+      }
+
+      return reply.send(payload);
     }
   );
 
@@ -298,6 +434,10 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
       .optional()
       .default("false")
       .transform((v) => v === "true" || v === "1"),
+    compare: z
+      .string()
+      .optional()
+      .transform((v) => v === "1" || v === "true"),
     debug: z
       .string()
       .optional()
@@ -389,6 +529,76 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
         ordersExcludedInRange: s.ordersExcludedInRange,
         aovNeto: toMoneyValue(aovNetoStr),
       };
+
+      if (q.compare) {
+        const startDt = DateTime.fromISO(from, { zone: tz }).startOf("day");
+        const endDt = DateTime.fromISO(to, { zone: tz }).startOf("day");
+        const spanDays = Math.ceil(endDt.diff(startDt, "days").days) + 1;
+        const endPrev = startDt.minus({ days: 1 });
+        const startPrev = endPrev.minus({ days: spanDays - 1 });
+        const fromPrev = startPrev.toISODate() ?? "";
+        const toPrev = endPrev.toISODate() ?? "";
+        try {
+          const rangePrev = parseLocalDateRangeToUtc(fromPrev, toPrev, tz);
+          const resultPrev = await listOrders({
+            startUtc: rangePrev.startUtc,
+            endUtc: rangePrev.endUtc,
+            includeExcluded: q.includeExcluded,
+            sort: "processedAt_desc",
+            page: 1,
+            pageSize: 1,
+          });
+          const sp = resultPrev.summary;
+          const aovPrevStr =
+            sp.ordersIncluded > 0
+              ? new Decimal(sp.incomeNeto).div(sp.ordersIncluded).toFixed(6)
+              : "0.000000";
+
+          payload.comparisonRange = { from: fromPrev, to: toPrev };
+          payload.comparison = {
+            incomeBruto: toMoneyValue(sp.incomeBruto),
+            refunds: toMoneyValue(sp.refunds),
+            incomeNeto: toMoneyValue(sp.incomeNeto),
+            shippingAmount: toMoneyValue(sp.shippingAmount),
+            taxAmount: toMoneyValue(sp.taxAmount),
+            discountAmount: toMoneyValue(sp.discountAmount),
+            ordersIncluded: sp.ordersIncluded,
+            aovNeto: toMoneyValue(aovPrevStr),
+          };
+
+          function delta(
+            cur: string | number,
+            prev: string | number
+          ): { percentChange: number; direction: "up" | "down" | "flat" } {
+            const c = typeof cur === "number" ? cur : new Decimal(cur).toNumber();
+            const p = typeof prev === "number" ? prev : new Decimal(prev).toNumber();
+            if (p === 0) {
+              return { percentChange: c === 0 ? 0 : 100, direction: c > 0 ? "up" : "flat" };
+            }
+            const pct = new Decimal(c).minus(p).div(p).times(100).toDecimalPlaces(2, Decimal.ROUND_HALF_EVEN).toNumber();
+            return {
+              percentChange: pct,
+              direction: pct > 0 ? "up" : pct < 0 ? "down" : "flat",
+            };
+          }
+
+          payload.deltas = {
+            incomeBruto: delta(s.incomeBruto, sp.incomeBruto),
+            refunds: delta(s.refunds, sp.refunds),
+            incomeNeto: delta(s.incomeNeto, sp.incomeNeto),
+            shippingAmount: delta(s.shippingAmount, sp.shippingAmount),
+            taxAmount: delta(s.taxAmount, sp.taxAmount),
+            discountAmount: delta(s.discountAmount, sp.discountAmount),
+            ordersIncluded: delta(s.ordersIncluded, sp.ordersIncluded),
+            aovNeto: delta(aovNetoStr, aovPrevStr),
+          };
+        } catch (e) {
+          payload.comparisonRange = { from: fromPrev, to: toPrev };
+          payload.comparison = null;
+          payload.deltas = null;
+        }
+      }
+
       if (q.debug) {
         payload.window_utc = {
           start: startUtc.toISOString(),

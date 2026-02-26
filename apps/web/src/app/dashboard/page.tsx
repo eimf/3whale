@@ -3,52 +3,204 @@
 import { useEffect, useMemo, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { useTranslations } from "next-intl";
-import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  BarElement,
-  Filler,
-  Legend,
-  Tooltip,
-} from "chart.js";
-import { Line, Bar } from "react-chartjs-2";
-import { setRangeDays, setSelectedDay, DASHBOARD_RANGE_DAYS } from "@/store/dashboardSlice";
+import { setComparing, setTimezoneIana } from "@/store/dashboardSlice";
 import type { RootState } from "@/store/store";
-import type { RangeDays } from "@/store/dashboardSlice";
 import { formatMoneyMXN } from "@/lib/formatMoneyMXN";
 import type { DailyPointV2, SummaryV2, SyncStatusResponse } from "@/types/income";
+import type { DailyV2Response } from "@/types/income";
+import {
+  MetricDrilldownDialog,
+  type DashboardMetricKey,
+  type SummaryItem,
+} from "@/components/dashboard/MetricDrilldownDialog";
+import type { BarSeriesPoint } from "@/components/dashboard/MetricBarsChart";
+import { ShoppingBagIcon } from "@/components/dashboard/ShoppingBagIcon";
+import { TileSparkline } from "@/components/dashboard/TileSparkline";
+import { RangeSelectorPopover, getRangeTriggerLabel } from "@/components/dashboard/RangeSelectorPopover";
+import { SyncControls } from "@/components/dashboard/SyncControls";
+import {
+  getRequestQueryString,
+} from "@/lib/dateRangeParams";
+import { metricsMeta, TILE_METRIC_KEYS, TILE_TO_DELTA_KEY, NEGATIVE_DELTA_METRICS } from "@/lib/metricsMeta";
+import {
+  TooltipProvider,
+  TooltipRoot,
+  TooltipTrigger,
+  TooltipPortal,
+  TooltipContent,
+} from "@/components/ui/tooltip";
 
-ChartJS.register(
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  BarElement,
-  Filler,
-  Legend,
-  Tooltip
-);
+function ShareIcon() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" />
+      <polyline points="16 6 12 2 8 6" />
+      <line x1="12" y1="2" x2="12" y2="15" />
+    </svg>
+  );
+}
+function KebabMenuIcon() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <circle cx="12" cy="12" r="1" />
+      <circle cx="12" cy="5" r="1" />
+      <circle cx="12" cy="19" r="1" />
+    </svg>
+  );
+}
+function FiltersIcon() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
+    </svg>
+  );
+}
+function GridIcon() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <rect width="7" height="7" x="3" y="3" rx="1" />
+      <rect width="7" height="7" x="14" y="3" rx="1" />
+      <rect width="7" height="7" x="14" y="14" rx="1" />
+      <rect width="7" height="7" x="3" y="14" rx="1" />
+    </svg>
+  );
+}
 
+/**
+ * Bar series from daily/hourly data. date can be "YYYY-MM-DD" (day) or "YYYY-MM-DDTHH:00:00" (hour).
+ * For hour we use "HH:00" as x label; for day we use "MM-DD".
+ */
+function getBarsSeriesForMetric(
+  metricKey: DashboardMetricKey,
+  data: DailyPointV2[] | null,
+  granularity: "hour" | "day"
+): BarSeriesPoint[] | undefined {
+  if (!data || data.length === 0) return undefined;
+  const label = (r: DailyPointV2) =>
+    granularity === "hour" && r.date.includes("T")
+      ? r.date.slice(11, 16)
+      : r.date.slice(5);
+  if (metricKey === "orderRevenue" || metricKey === "netProfit") {
+    return data.map((r) => ({ x: label(r), y: Number(r.incomeNeto.raw) }));
+  }
+  if (metricKey === "returns") {
+    return data.map((r) => ({ x: label(r), y: Number(r.refunds.raw) }));
+  }
+  if (metricKey === "shippingCost") {
+    return data.map((r) => ({ x: label(r), y: Number(r.shippingAmount.raw) }));
+  }
+  if (metricKey === "totalOrders" || metricKey === "ordersOverZero") {
+    return data.map((r) => ({ x: label(r), y: r.ordersCount ?? 0 }));
+  }
+  if (metricKey === "grossSales") {
+    return data.map((r) => ({ x: label(r), y: Number(r.incomeBruto.raw) }));
+  }
+  if (metricKey === "taxes") {
+    return data.map((r) => ({ x: label(r), y: Number(r.taxAmount.raw) }));
+  }
+  if (metricKey === "discounts") {
+    return data.map((r) => ({ x: label(r), y: Number(r.discountAmount.raw) }));
+  }
+  return undefined;
+}
+
+/** Summary items for drilldown header; label from date (MM-DD or HH:00 for hourly). */
+function getSummaryItemsForMetric(
+  metricKey: DashboardMetricKey,
+  data: DailyPointV2[] | null,
+  granularity: "hour" | "day"
+): SummaryItem[] | undefined {
+  if (!data || data.length === 0) return undefined;
+  const slice = data.slice(-2);
+  if (slice.length === 0) return undefined;
+  const label = (d: string) =>
+    granularity === "hour" && d.includes("T") ? d.slice(11, 16) : d.slice(5);
+  const items: SummaryItem[] = [];
+  for (const r of slice) {
+    const displayValue = getSummaryItemDisplayValue(metricKey, r);
+    if (displayValue != null) items.push({ label: label(r.date), displayValue });
+  }
+  return items.length > 0 ? items : undefined;
+}
+
+function getSummaryItemDisplayValue(metricKey: DashboardMetricKey, r: DailyPointV2): string | null {
+  switch (metricKey) {
+    case "orderRevenue":
+    case "netProfit":
+      return `${formatMoneyMXN(r.incomeNeto.display)} MXN`;
+    case "returns":
+      return `${formatMoneyMXN(r.refunds.display)} MXN`;
+    case "shippingCost":
+      return `${formatMoneyMXN(r.shippingAmount.display)} MXN`;
+    case "totalOrders":
+    case "ordersOverZero":
+      return String(r.ordersCount ?? 0);
+    case "grossSales":
+      return `${formatMoneyMXN(r.incomeBruto.display)} MXN`;
+    case "taxes":
+      return `${formatMoneyMXN(r.taxAmount.display)} MXN`;
+    case "discounts":
+      return `${formatMoneyMXN(r.discountAmount.display)} MXN`;
+    default:
+      return null;
+  }
+}
+
+/** Sparkline values from daily data (number for viz only). Empty array = show flat line. */
+function getSparklineValues(
+  metricKey: DashboardMetricKey,
+  data: DailyPointV2[] | null
+): number[] {
+  if (!data || data.length === 0) return [];
+  if (metricKey === "orderRevenue" || metricKey === "netProfit") {
+    return data.map((r) => Number(r.incomeNeto.raw));
+  }
+  if (metricKey === "returns") return data.map((r) => Number(r.refunds.raw));
+  if (metricKey === "shippingCost") return data.map((r) => Number(r.shippingAmount.raw));
+  if (metricKey === "totalOrders" || metricKey === "ordersOverZero") {
+    return data.map((r) => r.ordersCount ?? 0);
+  }
+  if (metricKey === "grossSales") return data.map((r) => Number(r.incomeBruto.raw));
+  if (metricKey === "taxes") return data.map((r) => Number(r.taxAmount.raw));
+  if (metricKey === "discounts") return data.map((r) => Number(r.discountAmount.raw));
+  return [];
+}
 
 export default function DashboardPage() {
   const t = useTranslations();
+  const tRange = useTranslations("dashboard.range");
   const dispatch = useDispatch();
-  const rangeDays = useSelector((s: RootState) => s.dashboard.rangeDays);
-  const selectedDay = useSelector((s: RootState) => s.dashboard.selectedDay);
+  const rangePreset = useSelector((s: RootState) => s.dashboard.rangePreset);
+  const rangeCustom = useSelector((s: RootState) => s.dashboard.rangeCustom);
+  const isComparing = useSelector((s: RootState) => s.dashboard.isComparing);
+  const timezoneIana = useSelector((s: RootState) => s.dashboard.timezoneIana);
 
-  const [data, setData] = useState<DailyPointV2[] | null>(null);
+  const [dailyResponse, setDailyResponse] = useState<DailyV2Response | null>(null);
   const [summary, setSummary] = useState<SummaryV2 | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [syncStatus, setSyncStatus] = useState<SyncStatusResponse | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [drilldownOpen, setDrilldownOpen] = useState(false);
+  const [selectedMetricKey, setSelectedMetricKey] = useState<DashboardMetricKey>("orderRevenue");
+  const [selectedMetricTitle, setSelectedMetricTitle] = useState("");
+
+  const rangeParams = useMemo(
+    () => getRequestQueryString(rangePreset, rangeCustom, timezoneIana, isComparing),
+    [rangePreset, rangeCustom, timezoneIana, isComparing]
+  );
+  const queryString = rangeParams;
 
   useEffect(() => {
     let cancelled = false;
+    if (process.env.NODE_ENV === "development") {
+      // eslint-disable-next-line no-console
+      console.log("[dashboard] summary request params:", queryString);
+      // eslint-disable-next-line no-console
+      console.log("[dashboard] daily request params:", queryString);
+    }
     queueMicrotask(() => {
       if (!cancelled) {
         setLoading(true);
@@ -56,11 +208,11 @@ export default function DashboardPage() {
       }
     });
     Promise.all([
-      fetch(`/api/income/daily?days=${rangeDays}`).then((res) => {
+      fetch(`/api/income/daily?${queryString}`).then((res) => {
         if (!res.ok) return res.json().then((b) => Promise.reject(b));
-        return res.json() as Promise<DailyPointV2[]>;
+        return res.json() as Promise<DailyV2Response>;
       }),
-      fetch(`/api/income/summary?days=${rangeDays}`).then((res) => {
+      fetch(`/api/income/summary?${queryString}`).then((res) => {
         if (!res.ok) return res.json().then((b) => Promise.reject(b));
         return res.json() as Promise<SummaryV2>;
       }),
@@ -71,9 +223,13 @@ export default function DashboardPage() {
     ])
       .then(([dailyJson, summaryJson, syncJson]) => {
         if (!cancelled) {
-          setData(Array.isArray(dailyJson) ? dailyJson : []);
+          setDailyResponse(dailyJson);
           setSummary(summaryJson);
-          if (syncJson) setSyncStatus(syncJson);
+          if (syncJson) {
+            setSyncStatus(syncJson);
+            const tz = syncJson.shopConfig?.timezoneIana ?? null;
+            if (tz) dispatch(setTimezoneIana(tz));
+          }
         }
       })
       .catch((err) => {
@@ -85,12 +241,28 @@ export default function DashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [rangeDays]);
+  }, [queryString, dispatch]);
 
-  const dateRangeLabel = useMemo(() => {
-    if (!summary?.range) return "";
-    return `${summary.range.from} → ${summary.range.to}`;
-  }, [summary]);
+  useEffect(() => {
+    const tz = syncStatus?.shopConfig?.timezoneIana ?? null;
+    if (tz) dispatch(setTimezoneIana(tz));
+  }, [syncStatus, dispatch]);
+
+  const data = dailyResponse?.data ?? null;
+  const granularity = dailyResponse?.granularity ?? "day";
+  const comparisonData = dailyResponse?.comparison ?? null;
+  const comparisonRange = dailyResponse?.comparisonRange ?? summary?.comparisonRange ?? null;
+
+  const triggerLabel = useMemo(
+    () =>
+      getRangeTriggerLabel(
+        rangePreset,
+        rangeCustom,
+        summary?.range ? { from: summary.range.from, to: summary.range.to } : undefined,
+        (k) => tRange(k)
+      ),
+    [rangePreset, rangeCustom, summary?.range, tRange]
+  );
 
   const lastSyncLabel = useMemo(() => {
     if (!syncStatus?.syncState?.lastSyncFinishedAt) return t("sync.lastSyncedNever");
@@ -107,11 +279,12 @@ export default function DashboardPage() {
   async function handleSyncNow() {
     setSyncing(true);
     setSyncMessage(null);
+    setSyncError(null);
     try {
       const res = await fetch("/api/sync/run", { method: "POST" });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setSyncMessage(body?.error ?? "Error");
+        setSyncError(body?.error ?? "Error");
         return;
       }
       setSyncMessage(t("sync.syncStarted"));
@@ -119,12 +292,12 @@ export default function DashboardPage() {
         fetch("/api/sync/status")
           .then((r) => (r.ok ? r.json() : null))
           .then((s: SyncStatusResponse | null) => s && setSyncStatus(s));
-        fetch(`/api/income/daily?days=${rangeDays}`)
-          .then((r) => (r.ok ? r.json() : []))
-          .then((d) => setData(Array.isArray(d) ? d : []));
-        fetch(`/api/income/summary?days=${rangeDays}`)
+        fetch(`/api/income/daily?${queryString}`)
           .then((r) => (r.ok ? r.json() : null))
-          .then((s) => s && setSummary(s));
+          .then((d: DailyV2Response | null) => d && setDailyResponse(d));
+        fetch(`/api/income/summary?${queryString}`)
+          .then((r) => (r.ok ? r.json() : null))
+          .then((s: SummaryV2 | null) => s && setSummary(s));
         setSyncMessage(null);
       }, 4000);
     } finally {
@@ -132,97 +305,95 @@ export default function DashboardPage() {
     }
   }
 
-  // Display-only: profit margin from server summary (no client-side totals).
-  const profitMarginPct = useMemo(() => {
-    if (!summary) return null;
-    const rev = Number(summary.incomeBruto.display);
-    const net = Number(summary.incomeNeto.display);
-    if (rev <= 0) return null;
-    return ((net / rev) * 100).toFixed(1);
-  }, [summary]);
-
-  // Chart: plot from .raw; string→number for visualization only (no client-side money calc).
-  const chartData = useMemo(() => {
-    if (!data || data.length === 0) return null;
-    const labels = data.map((r) => r.date);
-    return {
-      labels,
-      datasets: [
-        {
-          label: t("metrics.incomeNeto"),
-          data: data.map((r) => Number(r.incomeNeto.raw)),
-          borderColor: "rgb(34, 197, 94)",
-          backgroundColor: "rgba(34, 197, 94, 0.1)",
-          fill: true,
-        },
-        {
-          label: t("metrics.incomeBruto"),
-          data: data.map((r) => Number(r.incomeBruto.raw)),
-          borderColor: "rgb(59, 130, 246)",
-          backgroundColor: "rgba(59, 130, 246, 0.1)",
-          fill: true,
-        },
-        {
-          label: t("metrics.refunds"),
-          data: data.map((r) => Number(r.refunds.raw)),
-          borderColor: "rgb(239, 68, 68)",
-          backgroundColor: "rgba(239, 68, 68, 0.1)",
-          fill: true,
-        },
-      ],
-    };
-  }, [data, t]);
-
-  const revenueChartData = useMemo(() => {
-    if (!data || data.length === 0) return null;
-    const labels = data.map((r) => r.date.slice(5));
-    const rev = data.map((r) => Number(r.incomeBruto.raw));
-    return {
-      labels,
-      datasets: [
-        { label: t("metrics.revenue"), data: rev, borderColor: "rgb(255,255,255)", backgroundColor: "rgba(255,255,255,0.1)", fill: true },
-      ],
-    };
-  }, [data, t]);
-
-  const ordersPerDayData = useMemo(() => {
-    if (!data || data.length === 0) return null;
-    const labels = data.map((r) => r.date.slice(5));
-    const counts = data.map((r) => r.ordersCount ?? 0);
-    return {
-      labels,
-      datasets: [{ label: t("metrics.ordersPerDay"), data: counts, backgroundColor: "rgba(113, 113, 122, 0.8)" }],
-    };
-  }, [data, t]);
-
-  const netProfitChartData = useMemo(() => {
-    if (!data || data.length === 0) return null;
-    const labels = data.map((r) => r.date.slice(5));
-    const net = data.map((r) => Number(r.incomeNeto.raw));
-    return {
-      labels,
-      datasets: [
-        { label: t("metrics.netProfitChart"), data: net, borderColor: "rgb(34, 197, 94)", backgroundColor: "rgba(34, 197, 94, 0.1)", fill: true },
-      ],
-    };
-  }, [data, t]);
-
-  const options = useMemo(
-    () => ({
-      responsive: true,
-      onClick: (_: unknown, elements: { index: number }[], chart: { config?: { data?: { labels?: unknown[] } } }) => {
-        if (elements.length === 0) return;
-        const idx = elements[0].index;
-        const label = chart?.config?.data?.labels?.[idx];
-        if (typeof label === "string" && /^\d{4}-\d{2}-\d{2}$/.test(label)) {
-          dispatch(setSelectedDay(label));
-        }
-      },
-    }),
-    [dispatch]
+  const drilldownBarsSeries = useMemo(
+    () => getBarsSeriesForMetric(selectedMetricKey, data, granularity),
+    [selectedMetricKey, data, granularity]
   );
 
-  const barOptions = useMemo(() => ({ responsive: true }), []);
+  const drilldownSummaryItems = useMemo(
+    () => getSummaryItemsForMetric(selectedMetricKey, data, granularity),
+    [selectedMetricKey, data, granularity]
+  );
+
+  function openDrilldown(metricKey: DashboardMetricKey, title: string) {
+    setSelectedMetricKey(metricKey);
+    setSelectedMetricTitle(title);
+    setDrilldownOpen(true);
+  }
+
+  /** Delta for a tile: percentChange + direction; finance-aware color (negative metrics = red when up). */
+  function getTileDelta(metricKey: DashboardMetricKey): { percentChange: number; direction: "up" | "down" | "flat"; isNegative: boolean } | null {
+    const deltas = summary?.deltas;
+    if (!deltas) return null;
+    const deltaKey = TILE_TO_DELTA_KEY[metricKey];
+    if (!deltaKey) return null;
+    const d = deltas[deltaKey];
+    if (!d) return null;
+    return {
+      percentChange: d.percentChange,
+      direction: d.direction,
+      isNegative: NEGATIVE_DELTA_METRICS.has(metricKey),
+    };
+  }
+
+  const tileConfigs = TILE_METRIC_KEYS.map((metricKey) => ({ metricKey }));
+
+  function getTileValue(metricKey: DashboardMetricKey): string {
+    if (!summary) return "—";
+    switch (metricKey) {
+      case "orderRevenue":
+      case "netProfit":
+        return `${formatMoneyMXN(summary.incomeNeto.display)} MXN`;
+      case "returns":
+        return `${formatMoneyMXN(summary.refunds.display)} MXN`;
+      case "taxes":
+        return `${formatMoneyMXN(summary.taxAmount.display)} MXN`;
+      case "trueAov":
+      case "averageOrderValue":
+      case "aov":
+        return summary.ordersIncluded > 0 ? `$${formatMoneyMXN(summary.aovNeto.display)}` : "—";
+      case "totalOrders":
+      case "ordersOverZero":
+        return summary.ordersIncluded.toLocaleString();
+      case "grossSales":
+        return `${formatMoneyMXN(summary.incomeBruto.display)} MXN`;
+      case "shippingCost":
+        return `${formatMoneyMXN(summary.shippingAmount.display)} MXN`;
+      case "discounts":
+        return `${formatMoneyMXN(summary.discountAmount.display)} MXN`;
+      default:
+        return "—";
+    }
+  }
+
+  function getComparisonTotalForMetric(metricKey: DashboardMetricKey, s: SummaryV2): string | undefined {
+    const comp = s.comparison;
+    if (!comp) return undefined;
+    switch (metricKey) {
+      case "orderRevenue":
+      case "netProfit":
+        return `${formatMoneyMXN(comp.incomeNeto.display)} MXN`;
+      case "returns":
+        return `${formatMoneyMXN(comp.refunds.display)} MXN`;
+      case "taxes":
+        return `${formatMoneyMXN(comp.taxAmount.display)} MXN`;
+      case "trueAov":
+      case "averageOrderValue":
+      case "aov":
+        return comp.ordersIncluded > 0 ? `$${formatMoneyMXN(comp.aovNeto.display)}` : "—";
+      case "totalOrders":
+      case "ordersOverZero":
+        return comp.ordersIncluded.toLocaleString();
+      case "grossSales":
+        return `${formatMoneyMXN(comp.incomeBruto.display)} MXN`;
+      case "shippingCost":
+        return `${formatMoneyMXN(comp.shippingAmount.display)} MXN`;
+      case "discounts":
+        return `${formatMoneyMXN(comp.discountAmount.display)} MXN`;
+      default:
+        return undefined;
+    }
+  }
 
   if (loading) {
     return (
@@ -248,141 +419,162 @@ export default function DashboardPage() {
 
   return (
     <div className="p-6 space-y-6">
-      {/* Header: title left, range + date right */}
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold text-zinc-100 tracking-wide">
+      {/* Toolbar: single row — left: title + range + comparison; right: sync controls */}
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex flex-wrap items-center gap-3 min-w-0 flex-1">
+          <h1 className="text-2xl font-semibold text-zinc-100 tracking-wide shrink-0">
             {t("dashboard.title")}
           </h1>
-        </div>
-        <div className="flex items-center gap-3 flex-wrap">
-          <select
-            value={rangeDays}
-            onChange={(e) => dispatch(setRangeDays(Number(e.target.value) as RangeDays))}
-            className="bg-zinc-800 border border-zinc-600 rounded px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+          <RangeSelectorPopover
+            triggerLabel={triggerLabel}
+            timezoneIana={timezoneIana ?? "America/Mexico_City"}
+          />
+          <button
+            type="button"
+            onClick={() => dispatch(setComparing(!isComparing))}
+            className={`rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 shrink-0 ${
+              isComparing
+                ? "border-emerald-500 bg-emerald-500/20 text-emerald-400"
+                : "border-zinc-600 bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
+            }`}
           >
-            {DASHBOARD_RANGE_DAYS.map((d) => (
-              <option key={d} value={d}>
-                {t("dashboard.range.days", { days: d })}
-              </option>
-            ))}
-          </select>
-          <span className="text-sm text-zinc-500">{dateRangeLabel}</span>
+            {isComparing ? tRange("previousPeriod") : tRange("noComparison")}
+          </button>
+        </div>
+        <div className="shrink-0">
+          <SyncControls
+            lastSyncLabel={lastSyncLabel}
+            syncing={syncing}
+            syncMessage={syncMessage}
+            syncError={syncError}
+            onRefresh={handleSyncNow}
+          />
         </div>
       </div>
-      {/* Sync: last synced + Sync now button */}
-      <div className="flex flex-wrap items-center gap-3 text-sm">
-        <span className="text-zinc-500">
-          {t("sync.lastSynced")}: <span className="text-zinc-400">{lastSyncLabel}</span>
-        </span>
-        <button
-          type="button"
-          onClick={handleSyncNow}
-          disabled={syncing}
-          className="bg-zinc-700 hover:bg-zinc-600 disabled:opacity-50 disabled:cursor-not-allowed border border-zinc-600 rounded px-3 py-1.5 text-zinc-200 text-sm focus:outline-none focus:ring-1 focus:ring-emerald-500"
-        >
-          {syncing ? t("sync.syncing") : t("sync.syncNow")}
-        </button>
-        {syncMessage && (
-          <span className="text-emerald-400 text-sm">{syncMessage}</span>
-        )}
-      </div>
 
-      {/* Metric cards: from summary API (MoneyValue.display); no client-side totals */}
+      {/* Tienda section: header + KPI tiles */}
+      <section className="space-y-3">
+        <div className="flex items-center justify-between gap-4">
+          <h2 className="flex items-center gap-2 text-lg font-semibold text-zinc-100">
+            <ShoppingBagIcon />
+            {t("dashboard.tienda")}
+          </h2>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              aria-label={t("tiendaHeader.share")}
+              className="rounded p-2 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-zinc-950"
+            >
+              <ShareIcon />
+            </button>
+            <button
+              type="button"
+              aria-label={t("tiendaHeader.menu")}
+              className="rounded p-2 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-zinc-950"
+            >
+              <KebabMenuIcon />
+            </button>
+            <button
+              type="button"
+              aria-label={t("tiendaHeader.filters")}
+              className="rounded p-2 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-zinc-950"
+            >
+              <FiltersIcon />
+            </button>
+            <button
+              type="button"
+              aria-label={t("tiendaHeader.grid")}
+              className="rounded p-2 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-zinc-950"
+            >
+              <GridIcon />
+            </button>
+          </div>
+        </div>
+
+        <TooltipProvider delayDuration={300}>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-        <div className="bg-zinc-800 rounded-lg p-4 border border-zinc-700">
-          <div className="text-xs font-medium text-zinc-400 uppercase tracking-wider">{t("metrics.orderRevenue")}</div>
-          <div className="text-xl font-semibold text-zinc-100 mt-1">
-            {formatMoneyMXN(summary.incomeNeto.display)} MXN
-          </div>
-        </div>
-        <div className="bg-zinc-800 rounded-lg p-4 border border-zinc-700">
-          <div className="text-xs font-medium text-zinc-400 uppercase tracking-wider">{t("metrics.returns")}</div>
-          <div className="text-xl font-semibold text-zinc-100 mt-1">
-            {formatMoneyMXN(summary.refunds.display)} MXN
-          </div>
-        </div>
-        <div className="bg-zinc-800 rounded-lg p-4 border border-zinc-700">
-          <div className="text-xs font-medium text-zinc-400 uppercase tracking-wider">{t("metrics.cogs")}</div>
-          <div className="text-xl font-semibold text-zinc-100 mt-1">—</div>
-        </div>
-        <div className="bg-zinc-800 rounded-lg p-4 border border-zinc-700">
-          <div className="text-xs font-medium text-zinc-400 uppercase tracking-wider">{t("metrics.adSpend")}</div>
-          <div className="text-xl font-semibold text-zinc-100 mt-1">—</div>
-        </div>
-        <div className="bg-zinc-800 rounded-lg p-4 border border-zinc-700">
-          <div className="text-xs font-medium text-zinc-400 uppercase tracking-wider">{t("metrics.shippingCost")}</div>
-          <div className="text-xl font-semibold text-zinc-100 mt-1">
-            {formatMoneyMXN(summary.shippingAmount.display)} MXN
-          </div>
-        </div>
-        <div className="bg-zinc-800 rounded-lg p-4 border border-zinc-700">
-          <div className="text-xs font-medium text-zinc-400 uppercase tracking-wider">{t("metrics.totalOrders")}</div>
-          <div className="text-xl font-semibold text-zinc-100 mt-1">{summary.ordersIncluded.toLocaleString()}</div>
-        </div>
-        <div className="bg-zinc-800 rounded-lg p-4 border border-zinc-700">
-          <div className="text-xs font-medium text-zinc-400 uppercase tracking-wider">{t("metrics.grossProfit")}</div>
-          <div className="text-xl font-semibold text-zinc-100 mt-1">—</div>
-        </div>
-        <div className="bg-zinc-800 rounded-lg p-4 border border-zinc-700">
-          <div className="text-xs font-medium text-zinc-400 uppercase tracking-wider">{t("metrics.netProfit")}</div>
-          <div className="text-xl font-semibold text-zinc-100 mt-1">
-            {formatMoneyMXN(summary.incomeNeto.display)} MXN
-          </div>
-        </div>
-        <div className="bg-zinc-800 rounded-lg p-4 border border-zinc-700">
-          <div className="text-xs font-medium text-zinc-400 uppercase tracking-wider">{t("metrics.profitMargin")}</div>
-          <div className="text-xl font-semibold text-zinc-100 mt-1">
-            {profitMarginPct != null ? `${profitMarginPct}%` : "—"}
-          </div>
-        </div>
-        <div className="bg-zinc-800 rounded-lg p-4 border border-zinc-700">
-          <div className="text-xs font-medium text-zinc-400 uppercase tracking-wider">{t("metrics.blendedRoas")}</div>
-          <div className="text-xl font-semibold text-zinc-100 mt-1">—</div>
-        </div>
-        <div className="bg-zinc-800 rounded-lg p-4 border border-zinc-700">
-          <div className="text-xs font-medium text-zinc-400 uppercase tracking-wider">{t("metrics.aov")}</div>
-          <div className="text-xl font-semibold text-zinc-100 mt-1">
-            {summary.ordersIncluded > 0 ? `$${formatMoneyMXN(summary.aovNeto.display)}` : "—"}
-          </div>
-        </div>
-        <div className="bg-zinc-800 rounded-lg p-4 border border-zinc-700">
-          <div className="text-xs font-medium text-zinc-400 uppercase tracking-wider">{t("metrics.cac")}</div>
-          <div className="text-xl font-semibold text-zinc-100 mt-1">—</div>
-        </div>
+        {tileConfigs.map((config) => {
+          const meta = metricsMeta[config.metricKey];
+          const title = t(meta.titleKey);
+          const value = getTileValue(config.metricKey);
+          const sparklineValues = getSparklineValues(config.metricKey, data);
+          const delta = isComparing ? getTileDelta(config.metricKey) : null;
+          const description = t(meta.tooltipDescriptionKey);
+          const formula = meta.tooltipFormulaKey ? t(meta.tooltipFormulaKey) : null;
+          const note = meta.tooltipNoteKey ? t(meta.tooltipNoteKey) : null;
+          const deltaColor =
+            delta == null
+              ? ""
+              : delta.direction === "flat"
+                ? "text-zinc-500"
+                : delta.isNegative
+                  ? delta.direction === "up"
+                    ? "text-red-400"
+                    : "text-emerald-400"
+                  : delta.direction === "up"
+                    ? "text-emerald-400"
+                    : "text-red-400";
+          const deltaLabel =
+            delta == null
+              ? null
+              : delta.direction === "up"
+                ? `↑ ${delta.percentChange.toFixed(2)}%`
+                : delta.direction === "down"
+                  ? `↓ ${Math.abs(delta.percentChange).toFixed(2)}%`
+                  : "—";
+          return (
+            <button
+              key={config.metricKey}
+              type="button"
+              onClick={() => openDrilldown(config.metricKey, title)}
+              className="bg-zinc-800 rounded-lg p-4 border border-zinc-700 text-left w-full hover:bg-zinc-700/90 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-zinc-950 flex flex-col"
+            >
+              <div className="flex items-center gap-2 flex-wrap">
+                <ShoppingBagIcon />
+                <TooltipRoot>
+                  <TooltipTrigger asChild>
+                    <span className="text-xs font-medium text-zinc-400 uppercase tracking-wider cursor-help focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-1 rounded">
+                      {title}
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipPortal>
+                    <TooltipContent>
+                      <p>{description}</p>
+                      {formula && <p className="mt-1.5 text-zinc-400 font-mono text-xs">{formula}</p>}
+                      {note && <p className="mt-1 text-amber-200/90 text-xs">{note}</p>}
+                    </TooltipContent>
+                  </TooltipPortal>
+                </TooltipRoot>
+                {deltaLabel != null && (
+                  <span className={`text-xs font-medium ${deltaColor}`}>{deltaLabel}</span>
+                )}
+              </div>
+              <div className="text-xl font-semibold text-zinc-100 mt-1">{value}</div>
+              <div className="mt-2 flex items-end justify-start min-h-[36px]">
+                <TileSparkline values={sparklineValues} />
+              </div>
+            </button>
+          );
+        })}
       </div>
+        </TooltipProvider>
+      </section>
 
-      {/* Charts: all from API /api/income/daily */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="bg-zinc-800 rounded-lg p-4 border border-zinc-700 min-h-[280px]">
-          <h3 className="text-sm font-medium text-zinc-400 mb-2">{t("metrics.revenue")}</h3>
-          {revenueChartData && <Line data={revenueChartData} options={barOptions} />}
-        </div>
-        <div className="bg-zinc-800 rounded-lg p-4 border border-zinc-700 min-h-[280px]">
-          <h3 className="text-sm font-medium text-zinc-400 mb-2">{t("metrics.netProfitChart")}</h3>
-          {netProfitChartData && <Line data={netProfitChartData} options={barOptions} />}
-        </div>
-        <div className="bg-zinc-800 rounded-lg p-4 border border-zinc-700 min-h-[280px]">
-          <h3 className="text-sm font-medium text-zinc-400 mb-2">{t("metrics.ordersPerDay")}</h3>
-          {ordersPerDayData && <Bar data={ordersPerDayData} options={barOptions} />}
-        </div>
-        <div className="bg-zinc-800 rounded-lg p-4 border border-zinc-700 min-h-[280px]">
-          <h3 className="text-sm font-medium text-zinc-400 mb-2">{t("dashboard.incomeOverview")}</h3>
-          {chartData && <Line data={chartData} options={options} />}
-        </div>
-      </div>
-
-      <div className="bg-zinc-800 rounded-lg p-4 border border-zinc-700">
-        <h2 className="text-sm font-medium text-zinc-400 mb-2">{t("drilldown.selectDay")}</h2>
-        {selectedDay ? (
-          <p className="text-zinc-200">
-            {t("drilldown.ordersForDay", { date: selectedDay })}
-            <span className="ml-2 text-zinc-500">(Próximamente: listado de órdenes)</span>
-          </p>
-        ) : (
-          <p className="text-zinc-500">Selecciona un día en la gráfica para ver el detalle.</p>
-        )}
-      </div>
+      <MetricDrilldownDialog
+        open={drilldownOpen}
+        onOpenChange={setDrilldownOpen}
+        metricKey={selectedMetricKey}
+        title={selectedMetricTitle}
+        barsSeries={drilldownBarsSeries}
+        summaryItems={drilldownSummaryItems}
+        granularity={granularity}
+        isComparing={isComparing}
+        comparisonSeries={isComparing && comparisonData ? getBarsSeriesForMetric(selectedMetricKey, comparisonData, granularity) : undefined}
+        currentRange={summary?.range ? { from: summary.range.from, to: summary.range.to } : undefined}
+        comparisonRange={isComparing ? (comparisonRange ?? undefined) : undefined}
+        currentTotal={summary ? getTileValue(selectedMetricKey) : undefined}
+        comparisonTotal={isComparing && summary?.comparison ? getComparisonTotalForMetric(selectedMetricKey, summary) : undefined}
+      />
     </div>
   );
 }
