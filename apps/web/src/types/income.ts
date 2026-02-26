@@ -28,9 +28,45 @@ export type SummaryV2 = {
   ordersIncluded: number;
   ordersExcludedInRange: number;
   aovNeto: MoneyValue;
+  comparison?: SummaryV2Comparison | null;
+  comparisonRange?: { from: string; to: string };
+  deltas?: SummaryV2Deltas | null;
+};
+
+export type SummaryV2Comparison = {
+  incomeBruto: MoneyValue;
+  refunds: MoneyValue;
+  incomeNeto: MoneyValue;
+  shippingAmount: MoneyValue;
+  taxAmount: MoneyValue;
+  discountAmount: MoneyValue;
+  ordersIncluded: number;
+  aovNeto: MoneyValue;
+};
+
+export type DeltaItem = { percentChange: number; direction: "up" | "down" | "flat" };
+
+export type SummaryV2Deltas = {
+  incomeBruto: DeltaItem;
+  refunds: DeltaItem;
+  incomeNeto: DeltaItem;
+  shippingAmount: DeltaItem;
+  taxAmount: DeltaItem;
+  discountAmount: DeltaItem;
+  ordersIncluded: DeltaItem;
+  aovNeto: DeltaItem;
+};
+
+export type DailyV2Response = {
+  range: { from: string; to: string; timezone: string };
+  granularity: "hour" | "day";
+  data: DailyPointV2[];
+  comparison?: DailyPointV2[];
+  comparisonRange?: { from: string; to: string };
 };
 
 export type SyncStatusResponse = {
+  shopConfig?: { timezoneIana?: string };
   syncState: {
     lastSyncFinishedAt: string | null;
     lastSyncStatus: string | null;

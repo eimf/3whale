@@ -1,7 +1,26 @@
 {
   "dashboard": {
     "title": "DASHBOARD",
-    "range": { "label": "Rango", "days": "Últimos {days} días", "dropdown": "Últimos {days} días" },
+    "range": {
+      "label": "Rango",
+      "days": "Últimos {days} días",
+      "dropdown": "Últimos {days} días",
+      "presets": {
+        "today": "Hoy",
+        "yesterday": "Ayer",
+        "last7": "Últimos 7 días",
+        "last14": "Últimos 14 días",
+        "last30": "Últimos 30 días",
+        "last90": "Últimos 90 días",
+        "last365": "Últimos 365 días",
+        "lastMonth": "Mes pasado"
+      },
+      "previousPeriod": "Periodo anterior",
+      "noComparison": "Sin comparación",
+      "timezone": "Zona horaria",
+      "apply": "Aplicar",
+      "cancel": "Cancelar"
+    },
     "incomeOverview": "Ingreso bruto, reembolsos y neto",
     "tienda": "Tienda"
   },
@@ -116,7 +135,9 @@
   },
   "drilldown": {
     "selectDay": "Selecciona un día…",
-    "ordersForDay": "Órdenes del día {date}"
+    "ordersForDay": "Órdenes del día {date}",
+    "tabs": { "bars": "Bars", "comparison": "Comparison" },
+    "noData": "No hay datos aún"
   },
   "state": {
     "loading": "Cargando…",

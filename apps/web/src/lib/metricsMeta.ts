@@ -143,3 +143,25 @@ export const TILE_METRIC_KEYS: DashboardMetricKey[] = [
   "returningCustomerRevenue",
   "discounts",
 ];
+
+/** Map tile metric to summary delta key (for comparison %). "Negative" = red when up (returns, taxes, discounts). */
+export const TILE_TO_DELTA_KEY: Partial<Record<DashboardMetricKey, "incomeNeto" | "refunds" | "taxAmount" | "ordersIncluded" | "incomeBruto" | "shippingAmount" | "discountAmount" | "aovNeto">> = {
+  orderRevenue: "incomeNeto",
+  netProfit: "incomeNeto",
+  returns: "refunds",
+  taxes: "taxAmount",
+  totalOrders: "ordersIncluded",
+  ordersOverZero: "ordersIncluded",
+  grossSales: "incomeBruto",
+  shippingCost: "shippingAmount",
+  discounts: "discountAmount",
+  trueAov: "aovNeto",
+  averageOrderValue: "aovNeto",
+  aov: "aovNeto",
+};
+
+export const NEGATIVE_DELTA_METRICS: Set<DashboardMetricKey> = new Set([
+  "returns",
+  "taxes",
+  "discounts",
+]);
