@@ -1,160 +1,162 @@
 {
-  "dashboard": {
-    "title": "DASHBOARD",
-    "range": {
-      "label": "Rango",
-      "days": "Últimos {days} días",
-      "dropdown": "Últimos {days} días",
-      "presets": {
-        "today": "Hoy",
-        "yesterday": "Ayer",
-        "last7": "Últimos 7 días",
-        "last14": "Últimos 14 días",
-        "last30": "Últimos 30 días",
-        "last90": "Últimos 90 días",
-        "last365": "Últimos 365 días",
-        "lastMonth": "Mes pasado"
-      },
-      "previousPeriod": "Periodo anterior",
-      "noComparison": "Sin comparación",
-      "timezone": "Zona horaria",
-      "apply": "Aplicar",
-      "cancel": "Cancelar"
+    "dashboard": {
+        "title": "DASHBOARD",
+        "range": {
+            "label": "Rango",
+            "days": "Últimos {days} días",
+            "dropdown": "Últimos {days} días",
+            "presets": {
+                "today": "Hoy",
+                "yesterday": "Ayer",
+                "last7": "Últimos 7 días",
+                "last14": "Últimos 14 días",
+                "last30": "Últimos 30 días",
+                "last90": "Últimos 90 días",
+                "last365": "Últimos 365 días",
+                "lastMonth": "Mes pasado"
+            },
+            "previousPeriod": "Periodo anterior",
+            "noComparison": "Sin comparación",
+            "timezone": "Zona horaria",
+            "apply": "Aplicar",
+            "cancel": "Cancelar"
+        },
+        "incomeOverview": "Ingreso bruto, reembolsos y neto",
+        "tienda": "Tienda"
     },
-    "incomeOverview": "Ingreso bruto, reembolsos y neto",
-    "tienda": "Tienda"
-  },
-  "metrics": {
-    "incomeBruto": "Ingreso bruto",
-    "refunds": "Reembolsos",
-    "incomeNeto": "Ingreso neto",
-    "revenue": "REVENUE",
-    "returns": "RETURNS",
-    "cogs": "COGS (PRODUCTO)",
-    "adSpend": "AD SPEND",
-    "shippingCost": "SHIPPING COST",
-    "totalOrders": "ÓRDENES TOTALES",
-    "grossProfit": "GROSS PROFIT",
-    "netProfit": "NET PROFIT",
-    "profitMargin": "PROFIT MARGIN",
-    "blendedRoas": "BLENDED ROAS",
-    "aov": "AOV",
-    "cac": "CAC",
-    "revenueVsAdSpend": "REVENUE VS AD SPEND",
-    "blendedRoasChart": "BLENDED ROAS",
-    "ordersPerDay": "ÓRDENES POR DÍA",
-    "netProfitChart": "NET PROFIT",
-    "orderRevenue": "Order Revenue",
-    "taxes": "Taxes",
-    "trueAov": "AOV real",
-    "averageOrderValue": "Valor promedio de orden",
-    "newCustomers": "Clientes nuevos",
-    "grossSales": "Ventas brutas",
-    "returningCustomers": "Clientes recurrentes",
-    "ordersOverZero": "Órdenes > $0",
-    "newCustomerOrders": "Órdenes de clientes nuevos",
-    "unitsSold": "Unidades vendidas",
-    "newCustomerRevenue": "Ingresos de clientes nuevos",
-    "returningCustomerRevenue": "Ingresos de clientes recurrentes",
-    "discounts": "Descuentos",
-    "ingresos": "Ingresos",
-    "ordenes": "Órdenes",
-    "reembolsos": "Reembolsos",
-    "impuestosVentas": "Impuestos sobre ventas",
-    "tooltips": {
-      "ingresos": {
-        "description": "Ingresos generados después de envío, impuestos y descuentos (antes de reembolsos).",
-        "formula": "Order Revenue = Gross Sales + Shipping + Taxes − Discounts"
-      },
-      "ordenes": {
-        "description": "Número total de órdenes realizadas dentro del rango seleccionado."
-      },
-      "reembolsos": {
-        "description": "Monto reembolsado en el periodo seleccionado. Calculado por fecha de reembolso.",
-        "note": "Puede variar vs Shopify si usas apps de devoluciones de terceros."
-      },
-      "impuestosVentas": {
-        "description": "Impuestos pagados por el cliente − impuestos devueltos."
-      },
-      "trueAov": {
-        "description": "Promedio del valor de órdenes no-cero (antes de envío o impuestos).",
-        "formula": "True AOV = (Order Revenue − Shipping Price − Taxes) / Número de órdenes > $0"
-      },
-      "averageOrderValue": {
-        "description": "Promedio del valor de órdenes (antes de envío o impuestos).",
-        "formula": "AOV = (Order Revenue − Shipping Price − Taxes) / Número de órdenes"
-      },
-      "newCustomers": {
-        "description": "Porcentaje de compras realizadas por clientes nuevos.",
-        "formula": "New Customers % = Número de órdenes de clientes nuevos / Órdenes totales"
-      },
-      "grossSales": {
-        "description": "Ventas brutas (antes de envío, impuestos, descuentos o reembolsos).",
-        "formula": "Gross Sales = Product Price × Units Sold"
-      },
-      "returningCustomers": {
-        "description": "Porcentaje de órdenes realizadas por clientes recurrentes.",
-        "formula": "Returning Customers % = Número de órdenes de clientes recurrentes / Órdenes totales"
-      },
-      "ordersOverZero": {
-        "description": "Total de órdenes con ingresos mayores a cero.",
-        "formula": "Non-Zero Orders = Conteo de órdenes donde Order Revenue > $0"
-      },
-      "newCustomerOrders": {
-        "description": "Total de órdenes realizadas por clientes nuevos en el rango seleccionado."
-      },
-      "unitsSold": {
-        "description": "Total de unidades vendidas (suma de cantidades de line items)."
-      },
-      "newCustomerRevenue": {
-        "description": "Ingresos totales provenientes de órdenes de clientes nuevos."
-      },
-      "returningCustomerRevenue": {
-        "description": "Ingresos totales provenientes de órdenes de clientes recurrentes."
-      },
-      "discounts": {
-        "description": "Descuentos totales aplicados a la orden, incluyendo descuentos de envío."
-      },
-      "totalSales": {
-        "description": "Ventas totales netas después de envío, impuestos, descuentos y reembolsos. Ingresos por fecha de orden; reembolsos por fecha de reembolso.",
-        "formula": "Total Sales = Gross Sales + Shipping + Taxes − Discounts − Refunded Sales − Refunded Shipping − Refunded Taxes"
-      },
-      "salesTaxes": {
-        "description": "Total de impuestos pagados por los clientes, antes de reembolsos."
-      },
-      "netProfit": { "description": "Beneficio neto después de costos y reembolsos." },
-      "cogs": { "description": "Costo de productos vendidos." },
-      "adSpend": { "description": "Gasto en publicidad." },
-      "shippingCost": { "description": "Costo de envío." },
-      "grossProfit": { "description": "Beneficio bruto." },
-      "profitMargin": { "description": "Margen de beneficio." },
-      "blendedRoas": { "description": "ROAS mezclado." },
-      "aov": { "description": "Valor promedio de orden." },
-      "cac": { "description": "Costo de adquisición de cliente." }
+    "metrics": {
+        "incomeBruto": "Ingreso bruto",
+        "refunds": "Reembolsos",
+        "incomeNeto": "Ingreso neto",
+        "revenue": "REVENUE",
+        "returns": "RETURNS",
+        "cogs": "COGS (PRODUCTO)",
+        "adSpend": "AD SPEND",
+        "shippingCost": "SHIPPING COST",
+        "totalOrders": "ÓRDENES TOTALES",
+        "grossProfit": "GROSS PROFIT",
+        "netProfit": "NET PROFIT",
+        "profitMargin": "PROFIT MARGIN",
+        "blendedRoas": "BLENDED ROAS",
+        "aov": "AOV",
+        "cac": "CAC",
+        "revenueVsAdSpend": "REVENUE VS AD SPEND",
+        "blendedRoasChart": "BLENDED ROAS",
+        "ordersPerDay": "ÓRDENES POR DÍA",
+        "netProfitChart": "NET PROFIT",
+        "orderRevenue": "Order Revenue",
+        "taxes": "Taxes",
+        "trueAov": "AOV real",
+        "averageOrderValue": "Valor promedio de orden",
+        "newCustomers": "Clientes nuevos",
+        "grossSales": "Ventas brutas",
+        "returningCustomers": "Clientes recurrentes",
+        "ordersOverZero": "Órdenes > $0",
+        "newCustomerOrders": "Órdenes de clientes nuevos",
+        "unitsSold": "Unidades vendidas",
+        "newCustomerRevenue": "Ingresos de clientes nuevos",
+        "returningCustomerRevenue": "Ingresos de clientes recurrentes",
+        "discounts": "Descuentos",
+        "ingresos": "Ingresos",
+        "ordenes": "Órdenes",
+        "reembolsos": "Reembolsos",
+        "impuestosVentas": "Impuestos sobre ventas",
+        "tooltips": {
+            "ingresos": {
+                "description": "Ingresos de orden alineados a Shopify (netos por bucket, después de reembolsos).",
+                "formula": "Order Revenue (app) = Ingreso neto por bucket"
+            },
+            "ordenes": {
+                "description": "Número total de órdenes realizadas dentro del rango seleccionado."
+            },
+            "reembolsos": {
+                "description": "Monto reembolsado en el periodo seleccionado. Calculado por fecha de reembolso.",
+                "note": "Puede variar vs Shopify si usas apps de devoluciones de terceros."
+            },
+            "impuestosVentas": {
+                "description": "Impuestos pagados por el cliente − impuestos devueltos."
+            },
+            "trueAov": {
+                "description": "Promedio del valor de órdenes no-cero (antes de envío o impuestos).",
+                "formula": "True AOV = Order Revenue / Número de órdenes > $0"
+            },
+            "averageOrderValue": {
+                "description": "Promedio del valor de órdenes (antes de envío o impuestos).",
+                "formula": "AOV = Order Revenue / Número de órdenes"
+            },
+            "newCustomers": {
+                "description": "Porcentaje de compras realizadas por clientes nuevos.",
+                "formula": "New Customers % = Número de órdenes de clientes nuevos / Órdenes totales"
+            },
+            "grossSales": {
+                "description": "Ventas brutas (antes de envío, impuestos, descuentos o reembolsos).",
+                "formula": "Gross Sales = Product Price × Units Sold"
+            },
+            "returningCustomers": {
+                "description": "Porcentaje de órdenes realizadas por clientes recurrentes.",
+                "formula": "Returning Customers % = Número de órdenes de clientes recurrentes / Órdenes totales"
+            },
+            "ordersOverZero": {
+                "description": "Total de órdenes con ingresos mayores a cero.",
+                "formula": "Non-Zero Orders = Conteo de órdenes donde Order Revenue > $0"
+            },
+            "newCustomerOrders": {
+                "description": "Total de órdenes realizadas por clientes nuevos en el rango seleccionado."
+            },
+            "unitsSold": {
+                "description": "Total de unidades vendidas (suma de cantidades de line items)."
+            },
+            "newCustomerRevenue": {
+                "description": "Ingresos totales provenientes de órdenes de clientes nuevos."
+            },
+            "returningCustomerRevenue": {
+                "description": "Ingresos totales provenientes de órdenes de clientes recurrentes."
+            },
+            "discounts": {
+                "description": "Descuentos totales aplicados a la orden, incluyendo descuentos de envío."
+            },
+            "totalSales": {
+                "description": "Ventas totales netas después de envío, impuestos, descuentos y reembolsos. Ingresos por fecha de orden; reembolsos por fecha de reembolso.",
+                "formula": "Total Sales = Gross Sales + Shipping + Taxes − Discounts − Refunded Sales − Refunded Shipping − Refunded Taxes"
+            },
+            "salesTaxes": {
+                "description": "Total de impuestos pagados por los clientes, antes de reembolsos."
+            },
+            "netProfit": {
+                "description": "Beneficio neto después de costos y reembolsos."
+            },
+            "cogs": { "description": "Costo de productos vendidos." },
+            "adSpend": { "description": "Gasto en publicidad." },
+            "shippingCost": { "description": "Costo de envío." },
+            "grossProfit": { "description": "Beneficio bruto." },
+            "profitMargin": { "description": "Margen de beneficio." },
+            "blendedRoas": { "description": "ROAS mezclado." },
+            "aov": { "description": "Valor promedio de orden." },
+            "cac": { "description": "Costo de adquisición de cliente." }
+        }
+    },
+    "drilldown": {
+        "selectDay": "Selecciona un día…",
+        "ordersForDay": "Órdenes del día {date}",
+        "tabs": { "bars": "Bars", "comparison": "Comparison" },
+        "noData": "No hay datos aún"
+    },
+    "state": {
+        "loading": "Cargando…",
+        "errorLoading": "Error al cargar datos",
+        "noData": "Sin datos"
+    },
+    "sync": {
+        "lastSynced": "Última sincronización",
+        "lastSyncedNever": "Nunca",
+        "syncNow": "Sincronizar ahora",
+        "syncing": "Sincronizando…",
+        "syncStarted": "Sincronización en curso. Actualiza en un momento."
+    },
+    "tiendaHeader": {
+        "share": "Compartir o exportar",
+        "menu": "Menú",
+        "filters": "Filtros o controles",
+        "grid": "Vista de cuadrícula"
     }
-  },
-  "drilldown": {
-    "selectDay": "Selecciona un día…",
-    "ordersForDay": "Órdenes del día {date}",
-    "tabs": { "bars": "Bars", "comparison": "Comparison" },
-    "noData": "No hay datos aún"
-  },
-  "state": {
-    "loading": "Cargando…",
-    "errorLoading": "Error al cargar datos",
-    "noData": "Sin datos"
-  },
-  "sync": {
-    "lastSynced": "Última sincronización",
-    "lastSyncedNever": "Nunca",
-    "syncNow": "Sincronizar ahora",
-    "syncing": "Sincronizando…",
-    "syncStarted": "Sincronización en curso. Actualiza en un momento."
-  },
-  "tiendaHeader": {
-    "share": "Compartir o exportar",
-    "menu": "Menú",
-    "filters": "Filtros o controles",
-    "grid": "Vista de cuadrícula"
-  }
 }

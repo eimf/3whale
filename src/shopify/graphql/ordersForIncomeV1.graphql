@@ -9,50 +9,63 @@
 #   refund.amount         <- refund.totalRefundedSet.shopMoney
 
 query OrdersForIncomeV1($first: Int!, $after: String, $query: String) {
-  orders(first: $first, after: $after, query: $query, sortKey: PROCESSED_AT) {
-    pageInfo {
-      hasNextPage
-      endCursor
+    orders(first: $first, after: $after, query: $query, sortKey: PROCESSED_AT) {
+        pageInfo {
+            hasNextPage
+            endCursor
+        }
+        nodes {
+            id
+            processedAt
+            cancelledAt
+            test
+            currentSubtotalPriceSet {
+                shopMoney {
+                    amount
+                    currencyCode
+                }
+            }
+            currentShippingPriceSet {
+                shopMoney {
+                    amount
+                    currencyCode
+                }
+            }
+            currentTotalTaxSet {
+                shopMoney {
+                    amount
+                    currencyCode
+                }
+            }
+            currentTotalDiscountsSet {
+                shopMoney {
+                    amount
+                    currencyCode
+                }
+            }
+            refunds(first: 50) {
+                id
+                createdAt
+                totalRefundedSet {
+                    shopMoney {
+                        amount
+                        currencyCode
+                    }
+                }
+                refundLineItems(first: 100) {
+                    edges {
+                        node {
+                            quantity
+                            subtotalSet {
+                                shopMoney {
+                                    amount
+                                    currencyCode
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
-    nodes {
-      id
-      processedAt
-      cancelledAt
-      test
-      currentSubtotalPriceSet {
-        shopMoney {
-          amount
-          currencyCode
-        }
-      }
-      currentShippingPriceSet {
-        shopMoney {
-          amount
-          currencyCode
-        }
-      }
-      currentTotalTaxSet {
-        shopMoney {
-          amount
-          currencyCode
-        }
-      }
-      currentTotalDiscountsSet {
-        shopMoney {
-          amount
-          currencyCode
-        }
-      }
-      refunds(first: 50) {
-        id
-        createdAt
-        totalRefundedSet {
-          shopMoney {
-            amount
-            currencyCode
-          }
-        }
-      }
-    }
-  }
 }

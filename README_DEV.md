@@ -2,6 +2,8 @@
 
 Single-store Shopify → Postgres sync for income v1. Single source of truth: `docs/metrics/income_v1_contract.md`.
 
+Daily series API contract (canónico): `docs/metrics/income_daily_v2_contract.md`.
+
 ## Stack
 
 Node.js, TypeScript, Fastify, Drizzle + Postgres, BullMQ + Redis, zod, luxon, pino. Web: Next.js (App Router) in `apps/web`.
@@ -46,6 +48,7 @@ npm run dev
 - Dashboard: **http://localhost:3001/dashboard**
 
 **Vercel deployment:** Set environment variables in the project:
+
 - `INTERNAL_API_BASE_URL` – URL of the deployed backend API (e.g. `https://your-api.vercel.app`).
 - `INTERNAL_API_KEY` – set as a **secret**; never exposed to the browser. The BFF route `/api/income/daily` proxies to the backend with this key server-side only.
 
@@ -91,13 +94,13 @@ curl -s "http://localhost:3000/internal/income/daily?days=7" \
 
 ## Internal API (all require `x-internal-api-key`)
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | /internal/health | No auth; health check |
-| POST | /internal/bootstrap | Upsert shop_config from env; ensure sync_state |
-| POST | /internal/sync/run | Enqueue sync job; returns `{ jobId }` |
-| GET | /internal/sync-status | shop_config, sync_state, last 10 run logs, counts |
-| GET | /internal/income/daily?days=1\|2\|3\|7\|30 | Daily income series (strings, excluded=false) |
+| Method | Path                                       | Description                                       |
+| ------ | ------------------------------------------ | ------------------------------------------------- |
+| GET    | /internal/health                           | No auth; health check                             |
+| POST   | /internal/bootstrap                        | Upsert shop_config from env; ensure sync_state    |
+| POST   | /internal/sync/run                         | Enqueue sync job; returns `{ jobId }`             |
+| GET    | /internal/sync-status                      | shop_config, sync_state, last 10 run logs, counts |
+| GET    | /internal/income/daily?days=1\|2\|3\|7\|30 | Daily income series (strings, excluded=false)     |
 
 ## Store target (hard requirements)
 

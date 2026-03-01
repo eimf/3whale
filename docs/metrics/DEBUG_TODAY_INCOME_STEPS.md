@@ -22,7 +22,7 @@ The script prints:
 
 **Compare:**
 
-- Script’s **SUM(income_neto)** vs what the **API** returns for `GET /internal/income/summary-v2?days=1` (field `incomeNeto.display`). They must match; if not, the API or BFF is wrong.
+- Script’s **SUM(income_neto)** vs what the **API** returns for `GET /internal/income/summary-v2?days=1` (field `orderRevenue.display` / `incomeNeto.display`). They must match; if not, the API or BFF is wrong.
 - Script’s **SUM(income_neto)** and **order count** vs **Shopify** "Order Revenue" and "Orders" for the same day in the **store’s timezone**. Use the script’s `window_utc.start` / `window_utc.end` to know which orders we’re including (Shopify uses `processed_at` / payment date).
 
 ---
@@ -76,10 +76,10 @@ Response includes `window_utc: { start, end }`. Use those timestamps in Shopify 
 
 ## Checklist
 
-| Check | What to do |
-|-------|------------|
-| Script SUM(income_neto) = API incomeNeto? | If no → API/BFF bug. If yes → go to next. |
-| Script order count = Shopify Orders (today)? | If no → timezone, date type, or sync. |
+| Check                                            | What to do                                           |
+| ------------------------------------------------ | ---------------------------------------------------- |
+| Script SUM(income_neto) = API orderRevenue?      | If no → API/BFF bug. If yes → go to next.            |
+| Script order count = Shopify Orders (today)?     | If no → timezone, date type, or sync.                |
 | Script SUM(income_neto) ≈ Shopify Order Revenue? | If no → definition (tax, exclusions) or sync/window. |
-| last_sync_finished_at recent? | If no → run sync and re-run script. |
-| timezone_iana correct for store? | If no → fix via bootstrap / config. |
+| last_sync_finished_at recent?                    | If no → run sync and re-run script.                  |
+| timezone_iana correct for store?                 | If no → fix via bootstrap / config.                  |
