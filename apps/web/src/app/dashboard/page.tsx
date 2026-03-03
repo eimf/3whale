@@ -424,6 +424,36 @@ export default function DashboardPage() {
     } | null {
         const deltas = summary?.deltas;
         if (!deltas) return null;
+
+        const parityDeltaMap: Partial<
+            Record<
+                DashboardMetricKey,
+                | "grossSales"
+                | "returns"
+                | "taxes"
+                | "shippingCharges"
+                | "discounts"
+                | "netSales"
+            >
+        > = {
+            grossSales: "grossSales",
+            returns: "returns",
+            taxes: "taxes",
+            shippingCost: "shippingCharges",
+            discounts: "discounts",
+            netProfit: "netSales",
+        };
+
+        const parityKey = parityDeltaMap[metricKey];
+        if (parityKey && deltas.shopifyParity?.[parityKey]) {
+            const d = deltas.shopifyParity[parityKey];
+            return {
+                percentChange: d.percentChange,
+                direction: d.direction,
+                isNegative: NEGATIVE_DELTA_METRICS.has(metricKey),
+            };
+        }
+
         const deltaKey = TILE_TO_DELTA_KEY[metricKey];
         if (!deltaKey) return null;
         const d = deltas[deltaKey];
@@ -439,14 +469,21 @@ export default function DashboardPage() {
 
     function getTileValue(metricKey: DashboardMetricKey): string {
         if (!summary) return "—";
+        const parity = summary.shopifyParity;
         switch (metricKey) {
             case "orderRevenue":
                 return `${formatMoneyMXN(summary.orderRevenue.display)} MXN`;
             case "netProfit":
+                if (parity)
+                    return `${formatMoneyMXN(parity.netSales.display)} MXN`;
                 return `${formatMoneyMXN(summary.incomeNeto.display)} MXN`;
             case "returns":
+                if (parity)
+                    return `${formatMoneyMXN(parity.returns.display)} MXN`;
                 return `${formatMoneyMXN(summary.refunds.display)} MXN`;
             case "taxes":
+                if (parity)
+                    return `${formatMoneyMXN(parity.taxes.display)} MXN`;
                 return `${formatMoneyMXN(summary.taxAmount.display)} MXN`;
             case "trueAov":
             case "averageOrderValue":
@@ -458,10 +495,16 @@ export default function DashboardPage() {
             case "ordersOverZero":
                 return summary.ordersIncluded.toLocaleString();
             case "grossSales":
+                if (parity)
+                    return `${formatMoneyMXN(parity.grossSales.display)} MXN`;
                 return `${formatMoneyMXN(summary.incomeBruto.display)} MXN`;
             case "shippingCost":
+                if (parity)
+                    return `${formatMoneyMXN(parity.shippingCharges.display)} MXN`;
                 return `${formatMoneyMXN(summary.shippingAmount.display)} MXN`;
             case "discounts":
+                if (parity)
+                    return `${formatMoneyMXN(parity.discounts.display)} MXN`;
                 return `${formatMoneyMXN(summary.discountAmount.display)} MXN`;
             default:
                 return "—";
@@ -474,14 +517,21 @@ export default function DashboardPage() {
     ): string | undefined {
         const comp = s.comparison;
         if (!comp) return undefined;
+        const parity = comp.shopifyParity;
         switch (metricKey) {
             case "orderRevenue":
                 return `${formatMoneyMXN(comp.orderRevenue.display)} MXN`;
             case "netProfit":
+                if (parity)
+                    return `${formatMoneyMXN(parity.netSales.display)} MXN`;
                 return `${formatMoneyMXN(comp.incomeNeto.display)} MXN`;
             case "returns":
+                if (parity)
+                    return `${formatMoneyMXN(parity.returns.display)} MXN`;
                 return `${formatMoneyMXN(comp.refunds.display)} MXN`;
             case "taxes":
+                if (parity)
+                    return `${formatMoneyMXN(parity.taxes.display)} MXN`;
                 return `${formatMoneyMXN(comp.taxAmount.display)} MXN`;
             case "trueAov":
             case "averageOrderValue":
@@ -493,10 +543,16 @@ export default function DashboardPage() {
             case "ordersOverZero":
                 return comp.ordersIncluded.toLocaleString();
             case "grossSales":
+                if (parity)
+                    return `${formatMoneyMXN(parity.grossSales.display)} MXN`;
                 return `${formatMoneyMXN(comp.incomeBruto.display)} MXN`;
             case "shippingCost":
+                if (parity)
+                    return `${formatMoneyMXN(parity.shippingCharges.display)} MXN`;
                 return `${formatMoneyMXN(comp.shippingAmount.display)} MXN`;
             case "discounts":
+                if (parity)
+                    return `${formatMoneyMXN(parity.discounts.display)} MXN`;
                 return `${formatMoneyMXN(comp.discountAmount.display)} MXN`;
             default:
                 return undefined;

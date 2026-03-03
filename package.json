@@ -9,7 +9,8 @@
     "dev:api": "tsx src/api/index.ts",
     "dev:worker": "tsx src/jobs/worker.ts",
     "db:migrate": "tsx src/db/migrate.ts",
-    "debug:today": "tsx scripts/debug-today-income.ts"
+    "debug:today": "tsx scripts/debug-today-income.ts",
+    "print-summary": "tsx scripts/print-summary.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

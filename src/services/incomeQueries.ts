@@ -328,3 +328,386 @@ export async function getReconcile(params: {
         },
     };
 }
+
+export interface ReconcileParityRow {
+    shopifyOrderId: string;
+    processedInRange: boolean;
+    refundsInRange: boolean;
+    excluded: boolean;
+    excludedReason: string | null;
+    orderIncomeBruto: string;
+    orderShippingAmount: string;
+    orderTaxAmount: string;
+    orderDiscountAmount: string;
+    orderGrossSales: string;
+    refundEventsCount: number;
+    refundsEffective: string;
+    refundsReported: string;
+    refundsLineItemsAmount: string;
+    refundsLineItemsGrossAmount: string;
+    refundsLineItemsTaxAmount: string;
+    refundsShippingAmount: string;
+    refundsShippingTaxAmount: string;
+    refundsDutiesAmount: string;
+    refundsOrderAdjustmentsAmount: string;
+    refundsOrderAdjustmentsTaxAmount: string;
+    returnsUplift: string;
+}
+
+export interface ReconcileParityResult {
+    totals: {
+        processedOrdersCount: number;
+        refundedOrdersCount: number;
+        processedGrossSalesTotal: string;
+        returnsNetTotal: string;
+        returnsGrossTotal: string;
+        returnsUpliftTotal: string;
+    };
+    rows: ReconcileParityRow[];
+}
+
+export async function getReconcileParity(params: {
+    startUtc: Date;
+    endUtc: Date;
+    includeExcluded: boolean;
+    limit: number;
+}): Promise<ReconcileParityResult> {
+    const { startUtc, endUtc, includeExcluded, limit } = params;
+    const processedPredicate = includeExcluded
+        ? sql`TRUE`
+        : sql`oi.excluded = false`;
+    const refundsPredicate = includeExcluded
+        ? sql`TRUE`
+        : sql`oi.excluded = false`;
+
+    const rowsResult = await db.execute(sql`
+        WITH processed AS (
+            SELECT
+                oi.shopify_order_id,
+                oi.excluded,
+                oi.excluded_reason,
+                oi.income_bruto::numeric AS order_income_bruto,
+                oi.shipping_amount::numeric AS order_shipping_amount,
+                oi.tax_amount::numeric AS order_tax_amount,
+                oi.discount_amount::numeric AS order_discount_amount,
+                (oi.income_bruto - oi.shipping_amount + oi.discount_amount)::numeric AS order_gross_sales
+            FROM order_income_v1 oi
+            WHERE ${processedPredicate}
+                AND oi.processed_at >= ${startUtc}
+                AND oi.processed_at <= ${endUtc}
+        ),
+        refunds AS (
+            SELECT
+                rf.shopify_order_id,
+                COUNT(*)::int AS refund_events_count,
+                COALESCE(SUM(rf.refund_effective_amount), 0)::numeric AS refunds_effective,
+                COALESCE(SUM(rf.refund_reported_amount), 0)::numeric AS refunds_reported,
+                COALESCE(SUM(rf.refund_line_items_amount), 0)::numeric AS refunds_line_items_amount,
+                COALESCE(SUM(rf.refund_line_items_gross_amount), 0)::numeric AS refunds_line_items_gross_amount,
+                COALESCE(SUM(rf.refund_line_items_tax_amount), 0)::numeric AS refunds_line_items_tax_amount,
+                COALESCE(SUM(rf.refund_shipping_amount), 0)::numeric AS refunds_shipping_amount,
+                COALESCE(SUM(rf.refund_shipping_tax_amount), 0)::numeric AS refunds_shipping_tax_amount,
+                COALESCE(SUM(rf.refund_duties_amount), 0)::numeric AS refunds_duties_amount,
+                COALESCE(SUM(rf.refund_order_adjustments_amount), 0)::numeric AS refunds_order_adjustments_amount,
+                COALESCE(SUM(rf.refund_order_adjustments_tax_amount), 0)::numeric AS refunds_order_adjustments_tax_amount
+            FROM order_refund_event_v1 rf
+            INNER JOIN order_income_v1 oi ON oi.shopify_order_id = rf.shopify_order_id
+            WHERE ${refundsPredicate}
+                AND rf.refund_created_at >= ${startUtc}
+                AND rf.refund_created_at <= ${endUtc}
+            GROUP BY rf.shopify_order_id
+        )
+        SELECT
+            COALESCE(p.shopify_order_id, r.shopify_order_id)::text AS shopify_order_id,
+            (p.shopify_order_id IS NOT NULL) AS processed_in_range,
+            (r.shopify_order_id IS NOT NULL) AS refunds_in_range,
+            COALESCE(p.excluded, false) AS excluded,
+            p.excluded_reason,
+            COALESCE(p.order_income_bruto, 0)::text AS order_income_bruto,
+            COALESCE(p.order_shipping_amount, 0)::text AS order_shipping_amount,
+            COALESCE(p.order_tax_amount, 0)::text AS order_tax_amount,
+            COALESCE(p.order_discount_amount, 0)::text AS order_discount_amount,
+            COALESCE(p.order_gross_sales, 0)::text AS order_gross_sales,
+            COALESCE(r.refund_events_count, 0)::int AS refund_events_count,
+            COALESCE(r.refunds_effective, 0)::text AS refunds_effective,
+            COALESCE(r.refunds_reported, 0)::text AS refunds_reported,
+            COALESCE(r.refunds_line_items_amount, 0)::text AS refunds_line_items_amount,
+            COALESCE(r.refunds_line_items_gross_amount, 0)::text AS refunds_line_items_gross_amount,
+            COALESCE(r.refunds_line_items_tax_amount, 0)::text AS refunds_line_items_tax_amount,
+            COALESCE(r.refunds_shipping_amount, 0)::text AS refunds_shipping_amount,
+            COALESCE(r.refunds_shipping_tax_amount, 0)::text AS refunds_shipping_tax_amount,
+            COALESCE(r.refunds_duties_amount, 0)::text AS refunds_duties_amount,
+            COALESCE(r.refunds_order_adjustments_amount, 0)::text AS refunds_order_adjustments_amount,
+            COALESCE(r.refunds_order_adjustments_tax_amount, 0)::text AS refunds_order_adjustments_tax_amount,
+            (COALESCE(r.refunds_line_items_gross_amount, 0) - COALESCE(r.refunds_line_items_amount, 0))::text AS returns_uplift
+        FROM processed p
+        FULL OUTER JOIN refunds r ON r.shopify_order_id = p.shopify_order_id
+        ORDER BY
+            (COALESCE(r.refunds_line_items_gross_amount, 0) - COALESCE(r.refunds_line_items_amount, 0)) DESC,
+            COALESCE(r.refunds_line_items_gross_amount, 0) DESC,
+            COALESCE(p.shopify_order_id, r.shopify_order_id) ASC
+        LIMIT ${limit}
+    `);
+
+    const totalsResult = await db.execute(sql`
+        WITH processed AS (
+            SELECT
+                oi.shopify_order_id,
+                (oi.income_bruto - oi.shipping_amount + oi.discount_amount)::numeric AS order_gross_sales
+            FROM order_income_v1 oi
+            WHERE ${processedPredicate}
+                AND oi.processed_at >= ${startUtc}
+                AND oi.processed_at <= ${endUtc}
+        ),
+        refunds AS (
+            SELECT
+                rf.shopify_order_id,
+                COALESCE(SUM(rf.refund_line_items_amount), 0)::numeric AS refunds_line_items_amount,
+                COALESCE(SUM(rf.refund_line_items_gross_amount), 0)::numeric AS refunds_line_items_gross_amount
+            FROM order_refund_event_v1 rf
+            INNER JOIN order_income_v1 oi ON oi.shopify_order_id = rf.shopify_order_id
+            WHERE ${refundsPredicate}
+                AND rf.refund_created_at >= ${startUtc}
+                AND rf.refund_created_at <= ${endUtc}
+            GROUP BY rf.shopify_order_id
+        )
+        SELECT
+            COUNT(*) FILTER (WHERE p.shopify_order_id IS NOT NULL)::int AS processed_orders_count,
+            COUNT(*) FILTER (WHERE r.shopify_order_id IS NOT NULL)::int AS refunded_orders_count,
+            COALESCE(SUM(COALESCE(p.order_gross_sales, 0)), 0)::text AS processed_gross_sales_total,
+            COALESCE(SUM(COALESCE(r.refunds_line_items_amount, 0)), 0)::text AS returns_net_total,
+            COALESCE(SUM(COALESCE(r.refunds_line_items_gross_amount, 0)), 0)::text AS returns_gross_total,
+            COALESCE(SUM(COALESCE(r.refunds_line_items_gross_amount, 0) - COALESCE(r.refunds_line_items_amount, 0)), 0)::text AS returns_uplift_total
+        FROM processed p
+        FULL OUTER JOIN refunds r ON r.shopify_order_id = p.shopify_order_id
+    `);
+
+    const rows =
+        (rowsResult as { rows: Record<string, unknown>[] }).rows?.map((r) => ({
+            shopifyOrderId: String(r.shopify_order_id ?? ""),
+            processedInRange: Boolean(r.processed_in_range),
+            refundsInRange: Boolean(r.refunds_in_range),
+            excluded: Boolean(r.excluded),
+            excludedReason:
+                r.excluded_reason == null ? null : String(r.excluded_reason),
+            orderIncomeBruto: toMoneyString(r.order_income_bruto),
+            orderShippingAmount: toMoneyString(r.order_shipping_amount),
+            orderTaxAmount: toMoneyString(r.order_tax_amount),
+            orderDiscountAmount: toMoneyString(r.order_discount_amount),
+            orderGrossSales: toMoneyString(r.order_gross_sales),
+            refundEventsCount: Number(r.refund_events_count ?? 0),
+            refundsEffective: toMoneyString(r.refunds_effective),
+            refundsReported: toMoneyString(r.refunds_reported),
+            refundsLineItemsAmount: toMoneyString(r.refunds_line_items_amount),
+            refundsLineItemsGrossAmount: toMoneyString(
+                r.refunds_line_items_gross_amount,
+            ),
+            refundsLineItemsTaxAmount: toMoneyString(
+                r.refunds_line_items_tax_amount,
+            ),
+            refundsShippingAmount: toMoneyString(r.refunds_shipping_amount),
+            refundsShippingTaxAmount: toMoneyString(
+                r.refunds_shipping_tax_amount,
+            ),
+            refundsDutiesAmount: toMoneyString(r.refunds_duties_amount),
+            refundsOrderAdjustmentsAmount: toMoneyString(
+                r.refunds_order_adjustments_amount,
+            ),
+            refundsOrderAdjustmentsTaxAmount: toMoneyString(
+                r.refunds_order_adjustments_tax_amount,
+            ),
+            returnsUplift: toMoneyString(r.returns_uplift),
+        })) ?? [];
+
+    const totalsRow =
+        (totalsResult as { rows: Record<string, unknown>[] }).rows?.[0] ?? {};
+
+    return {
+        totals: {
+            processedOrdersCount: Number(totalsRow.processed_orders_count ?? 0),
+            refundedOrdersCount: Number(totalsRow.refunded_orders_count ?? 0),
+            processedGrossSalesTotal: toMoneyString(
+                totalsRow.processed_gross_sales_total,
+            ),
+            returnsNetTotal: toMoneyString(totalsRow.returns_net_total),
+            returnsGrossTotal: toMoneyString(totalsRow.returns_gross_total),
+            returnsUpliftTotal: toMoneyString(totalsRow.returns_uplift_total),
+        },
+        rows,
+    };
+}
+
+export interface ShopifyCanonicalParityResult {
+    ordersCreatedInRange: number;
+    orderMoney: {
+        subtotalTotal: string;
+        discountsTotal: string;
+        shippingTotal: string;
+        taxTotal: string;
+    };
+    createdRefundsInRange: {
+        refundEventsCount: number;
+        lineItemsAmount: string;
+        lineItemsGross: string;
+        lineItemsTax: string;
+        shipping: string;
+        shippingTax: string;
+        duties: string;
+        orderAdjustments: string;
+        orderAdjustmentsTax: string;
+    };
+    metrics: {
+        grossSales: string;
+        discounts: string;
+        returns: string;
+        netSales: string;
+        shippingCharges: string;
+        returnFees: string;
+        taxes: string;
+        totalSales: string;
+    };
+}
+
+export async function getShopifyCanonicalParity(params: {
+    startUtc: Date;
+    endUtc: Date;
+    includeExcluded: boolean;
+}): Promise<ShopifyCanonicalParityResult> {
+    const { startUtc, endUtc, includeExcluded } = params;
+    // Order count: include cancelled, exclude only test (and deleted if present). When includeExcluded=true, count all in range.
+    const orderCountPredicate = includeExcluded
+        ? sql`TRUE`
+        : sql`(excluded = false OR excluded_reason = 'cancelled')`;
+    // Financial metrics: only non-cancelled, non-test (match Shopify Analytics: do NOT exclude fully_refunded).
+    // So we do not filter by excluded here — only by cancelled and test from payload.
+    const notCancelledPredicate = sql`(
+        (payload->>'cancelledAt' IS NULL OR TRIM(COALESCE(payload->>'cancelledAt', '')) = '' OR LOWER(TRIM(COALESCE(payload->>'cancelledAt', ''))) = 'null')
+        AND (payload->>'canceledAt' IS NULL OR TRIM(COALESCE(payload->>'canceledAt', '')) = '' OR LOWER(TRIM(COALESCE(payload->>'canceledAt', ''))) = 'null')
+    )`;
+    const result = await db.execute(sql`
+        WITH processed_orders AS (
+            SELECT
+                raw.payload,
+                oi.excluded,
+                oi.excluded_reason
+            FROM order_income_v1 oi
+            INNER JOIN shopify_order_raw raw ON raw.shopify_order_id = oi.shopify_order_id
+            WHERE oi.processed_at >= ${startUtc}
+                AND oi.processed_at <= ${endUtc}
+        ),
+        order_counts AS (
+            SELECT
+                COUNT(*) FILTER (WHERE ${orderCountPredicate})::int AS orders_processed_in_range
+            FROM processed_orders
+        ),
+        financial_orders AS (
+            SELECT
+                payload
+            FROM processed_orders
+            WHERE ${notCancelledPredicate}
+            AND (payload->>'test' IS NULL OR payload->>'test' = 'false')
+        ),
+        order_money AS (
+            SELECT
+                COALESCE(SUM(COALESCE(NULLIF(payload->'subtotalPriceSet'->'shopMoney'->>'amount', ''), '0')::numeric), 0)::text AS subtotal_total,
+                COALESCE(SUM(COALESCE(NULLIF(payload->'totalDiscountsSet'->'shopMoney'->>'amount', ''), '0')::numeric), 0)::text AS discounts_total,
+                COALESCE(SUM(COALESCE(NULLIF(payload->'totalShippingPriceSet'->'shopMoney'->>'amount', ''), '0')::numeric), 0)::text AS shipping_total,
+                COALESCE(SUM(COALESCE(NULLIF(payload->'totalTaxSet'->'shopMoney'->>'amount', ''), '0')::numeric), 0)::text AS tax_total
+            FROM financial_orders
+        ),
+        created_refunds AS (
+            SELECT
+                COUNT(*)::int AS refund_events_count,
+                COALESCE(SUM(rf.refund_line_items_amount), 0)::text AS line_items_amount,
+                COALESCE(SUM(rf.refund_line_items_gross_amount), 0)::text AS line_items_gross,
+                COALESCE(SUM(rf.refund_effective_amount), 0)::text AS effective_total,
+                COALESCE(SUM(rf.refund_line_items_tax_amount), 0)::text AS line_items_tax,
+                COALESCE(SUM(rf.refund_shipping_amount), 0)::text AS shipping,
+                COALESCE(SUM(rf.refund_shipping_tax_amount), 0)::text AS shipping_tax,
+                COALESCE(SUM(rf.refund_duties_amount), 0)::text AS duties,
+                COALESCE(SUM(rf.refund_order_adjustments_amount), 0)::text AS order_adjustments,
+                COALESCE(SUM(rf.refund_order_adjustments_tax_amount), 0)::text AS order_adjustments_tax
+            FROM order_refund_event_v1 rf
+            WHERE rf.refund_created_at >= ${startUtc}
+                AND rf.refund_created_at <= ${endUtc}
+        )
+        SELECT
+            oc.orders_processed_in_range,
+            om.subtotal_total,
+            om.discounts_total,
+            om.shipping_total,
+            om.tax_total,
+
+            cr.refund_events_count AS created_refund_events_count,
+            cr.line_items_amount AS created_line_items_amount,
+            cr.line_items_gross AS created_line_items_gross,
+            cr.effective_total AS created_effective_total,
+            cr.line_items_tax AS created_line_items_tax,
+            cr.shipping AS created_shipping,
+            cr.shipping_tax AS created_shipping_tax,
+            cr.duties AS created_duties,
+            cr.order_adjustments AS created_order_adjustments,
+            cr.order_adjustments_tax AS created_order_adjustments_tax,
+
+            (COALESCE(om.subtotal_total::numeric, 0) + COALESCE(om.discounts_total::numeric, 0))::text AS total_base_gross_sales,
+            (COALESCE(om.subtotal_total::numeric, 0) - COALESCE(cr.line_items_gross::numeric, 0))::text AS total_base_with_created_returns_net_sales,
+            (COALESCE(om.shipping_total::numeric, 0) - COALESCE(cr.shipping::numeric, 0))::text AS total_base_shipping_charges,
+            (COALESCE(om.tax_total::numeric, 0)
+                - COALESCE(cr.line_items_tax::numeric, 0)
+                - COALESCE(cr.shipping_tax::numeric, 0)
+                - COALESCE(cr.duties::numeric, 0)
+                - COALESCE(cr.order_adjustments_tax::numeric, 0))::text AS total_base_taxes,
+
+            (0 - COALESCE(om.discounts_total::numeric, 0))::text AS total_base_discounts_signed,
+            (0 - COALESCE(cr.line_items_gross::numeric, 0))::text AS created_returns_signed,
+            GREATEST(COALESCE(cr.order_adjustments::numeric, 0), 0)::text AS created_return_fees
+        FROM order_counts oc
+        CROSS JOIN order_money om
+        CROSS JOIN created_refunds cr
+    `);
+
+    const row = (result as { rows: Record<string, unknown>[] }).rows?.[0] ?? {};
+
+    const sumToFixed6 = (...vals: unknown[]): string => {
+        const total = vals.reduce((acc, v) => acc + Number(v ?? 0), 0);
+        return total.toFixed(6);
+    };
+
+    const metrics = {
+        grossSales: toMoneyString(row.total_base_gross_sales),
+        discounts: toMoneyString(row.total_base_discounts_signed),
+        returns: toMoneyString(row.created_returns_signed),
+        netSales: toMoneyString(row.total_base_with_created_returns_net_sales),
+        shippingCharges: toMoneyString(row.total_base_shipping_charges),
+        returnFees: toMoneyString(row.created_return_fees),
+        taxes: toMoneyString(row.total_base_taxes),
+        totalSales: sumToFixed6(
+            row.total_base_with_created_returns_net_sales,
+            row.total_base_shipping_charges,
+            row.created_return_fees,
+            row.total_base_taxes,
+        ),
+    };
+
+    return {
+        ordersCreatedInRange: Number(row.orders_processed_in_range ?? 0),
+        orderMoney: {
+            subtotalTotal: toMoneyString(row.subtotal_total),
+            discountsTotal: toMoneyString(row.discounts_total),
+            shippingTotal: toMoneyString(row.shipping_total),
+            taxTotal: toMoneyString(row.tax_total),
+        },
+        createdRefundsInRange: {
+            refundEventsCount: Number(row.created_refund_events_count ?? 0),
+            lineItemsAmount: toMoneyString(row.created_line_items_amount),
+            lineItemsGross: toMoneyString(row.created_line_items_gross),
+            lineItemsTax: toMoneyString(row.created_line_items_tax),
+            shipping: toMoneyString(row.created_shipping),
+            shippingTax: toMoneyString(row.created_shipping_tax),
+            duties: toMoneyString(row.created_duties),
+            orderAdjustments: toMoneyString(row.created_order_adjustments),
+            orderAdjustmentsTax: toMoneyString(row.created_order_adjustments_tax),
+        },
+        metrics,
+    };
+}

@@ -114,6 +114,23 @@ El contrato canónico de la API de series (`/internal/income/daily-v2`) vive en:
 - **Día del refund:** Usar el timestamp del refund cuando exista (ej. `Refund.createdAt` o campo equivalente en GraphQL) convertido a `shop_timezone`; mismo criterio de día que §4. Si no hay timestamp de refund, política v1: atribuir al mismo día que `Order.processedAt` (documentar en código).
 - **Series temporales:** Para un día dado, `refunds_día` suma todos los refunds cuyo “día de refund” es ese día; `income_neto_día = income_bruto_día − refunds_día`. Así income_bruto y refunds son series separadas y reconciliables.
 
+### Persistencia recomendada (implementada)
+
+Para auditoría y paridad con Shopify, cada refund también se persiste como evento canónico (`order_refund_event_v1`) con:
+
+- `refund_reported_amount` = `totalRefundedSet.shopMoney.amount`
+- `refund_line_items_amount` = suma de `refundLineItems[].subtotalSet.shopMoney.amount`
+- `refund_line_items_tax_amount` = suma de `refundLineItems[].totalTaxSet.shopMoney.amount`
+- `refund_shipping_amount` = suma de `refundShippingLines[].subtotalAmountSet.shopMoney.amount`
+- `refund_shipping_tax_amount` = suma de `refundShippingLines[].taxAmountSet.shopMoney.amount`
+- `refund_duties_amount` = suma de `duties[].amountSet.shopMoney.amount`
+- `refund_order_adjustments_amount` = suma de `orderAdjustments[].amountSet.shopMoney.amount`
+- `refund_order_adjustments_tax_amount` = suma de `orderAdjustments[].taxAmountSet.shopMoney.amount`
+- `refund_effective_amount` = monto final usado en KPI (`reported` o fallback a `line_items` cuando `reported=0`)
+- `refund_adjustment_amount` = `reported - line_items`
+
+Esto permite desglosar Returns por componentes sin re-parsear JSON crudo en cada consulta.
+
 ---
 
 ## 8. Reconciliación con Shopify

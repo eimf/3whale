@@ -135,4 +135,105 @@ describe("mapOrderToNormalized refund fallback", () => {
         expect(refunds).toHaveLength(1);
         expect(refunds[0].amount.amount).toBe("599");
     });
+
+    it("uses successful REFUND transactions when reported/components are zero", () => {
+        const fixture = loadFixture(
+            "order_partial_refund.graphql.json",
+        ) as Record<string, unknown>;
+
+        fixture.refunds = [
+            {
+                id: "gid://shopify/Refund/tx-fallback-1",
+                createdAt: "2026-02-28T17:37:02Z",
+                totalRefundedSet: {
+                    shopMoney: { amount: "0.0", currencyCode: "MXN" },
+                },
+                refundLineItems: { edges: [] },
+                refundShippingLines: { edges: [] },
+                orderAdjustments: { edges: [] },
+                duties: [],
+                transactions: {
+                    edges: [
+                        {
+                            node: {
+                                id: "gid://shopify/OrderTransaction/1",
+                                kind: "REFUND",
+                                status: "SUCCESS",
+                                amountSet: {
+                                    shopMoney: {
+                                        amount: "700.0",
+                                        currencyCode: "MXN",
+                                    },
+                                },
+                            },
+                        },
+                        {
+                            node: {
+                                id: "gid://shopify/OrderTransaction/2",
+                                kind: "REFUND",
+                                status: "PENDING",
+                                amountSet: {
+                                    shopMoney: {
+                                        amount: "90.0",
+                                        currencyCode: "MXN",
+                                    },
+                                },
+                            },
+                        },
+                    ],
+                },
+            },
+        ];
+
+        const { refunds } = mapOrderToNormalized(fixture);
+        expect(refunds).toHaveLength(1);
+        expect(refunds[0].transactionsAmount.amount).toBe("700");
+        expect(refunds[0].amount.amount).toBe("700");
+    });
+
+    it("computes gross line-items refund from original line item total, pro-rated by refunded quantity", () => {
+        const fixture = loadFixture(
+            "order_partial_refund.graphql.json",
+        ) as Record<string, unknown>;
+
+        fixture.refunds = [
+            {
+                id: "gid://shopify/Refund/gross-1",
+                createdAt: "2026-02-28T17:37:02Z",
+                totalRefundedSet: {
+                    shopMoney: { amount: "500.0", currencyCode: "MXN" },
+                },
+                refundLineItems: {
+                    edges: [
+                        {
+                            node: {
+                                quantity: 1,
+                                subtotalSet: {
+                                    shopMoney: {
+                                        amount: "500.0",
+                                        currencyCode: "MXN",
+                                    },
+                                },
+                                lineItem: {
+                                    id: "gid://shopify/LineItem/1",
+                                    quantity: 2,
+                                    originalTotalSet: {
+                                        shopMoney: {
+                                            amount: "1200.0",
+                                            currencyCode: "MXN",
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    ],
+                },
+            },
+        ];
+
+        const { refunds } = mapOrderToNormalized(fixture);
+        expect(refunds).toHaveLength(1);
+        expect(refunds[0].lineItemsAmount.amount).toBe("500");
+        expect(refunds[0].lineItemsGrossAmount?.amount).toBe("600");
+    });
 });

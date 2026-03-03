@@ -16,10 +16,26 @@ query OrdersForIncomeV1($first: Int!, $after: String, $query: String) {
         }
         nodes {
             id
+            name
+            createdAt
             processedAt
+            updatedAt
             cancelledAt
             test
+            sourceName
+            displayFinancialStatus
+            tags
+            app {
+                id
+                name
+            }
             currentSubtotalPriceSet {
+                shopMoney {
+                    amount
+                    currencyCode
+                }
+            }
+            subtotalPriceSet {
                 shopMoney {
                     amount
                     currencyCode
@@ -31,13 +47,31 @@ query OrdersForIncomeV1($first: Int!, $after: String, $query: String) {
                     currencyCode
                 }
             }
+            totalShippingPriceSet {
+                shopMoney {
+                    amount
+                    currencyCode
+                }
+            }
             currentTotalTaxSet {
                 shopMoney {
                     amount
                     currencyCode
                 }
             }
+            totalTaxSet {
+                shopMoney {
+                    amount
+                    currencyCode
+                }
+            }
             currentTotalDiscountsSet {
+                shopMoney {
+                    amount
+                    currencyCode
+                }
+            }
+            totalDiscountsSet {
                 shopMoney {
                     amount
                     currencyCode
@@ -62,6 +96,81 @@ query OrdersForIncomeV1($first: Int!, $after: String, $query: String) {
                                     currencyCode
                                 }
                             }
+                            totalTaxSet {
+                                shopMoney {
+                                    amount
+                                    currencyCode
+                                }
+                            }
+                            lineItem {
+                                id
+                                quantity
+                                originalTotalSet {
+                                    shopMoney {
+                                        amount
+                                        currencyCode
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                refundShippingLines(first: 20) {
+                    edges {
+                        node {
+                            subtotalAmountSet {
+                                shopMoney {
+                                    amount
+                                    currencyCode
+                                }
+                            }
+                            taxAmountSet {
+                                shopMoney {
+                                    amount
+                                    currencyCode
+                                }
+                            }
+                        }
+                    }
+                }
+                orderAdjustments(first: 20) {
+                    edges {
+                        node {
+                            amountSet {
+                                shopMoney {
+                                    amount
+                                    currencyCode
+                                }
+                            }
+                            taxAmountSet {
+                                shopMoney {
+                                    amount
+                                    currencyCode
+                                }
+                            }
+                        }
+                    }
+                }
+                transactions(first: 20) {
+                    edges {
+                        node {
+                            id
+                            kind
+                            status
+                            amountSet {
+                                shopMoney {
+                                    amount
+                                    currencyCode
+                                }
+                            }
+                        }
+                    }
+                }
+                duties {
+                    amountSet {
+                        shopMoney {
+                            amount
+                            currencyCode
                         }
                     }
                 }

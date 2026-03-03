@@ -20,6 +20,7 @@ vi.mock("../../db/index.js", () => {
         syncState: { id: "id" },
         shopifyOrderRaw: { id: "id" },
         orderIncomeV1: { id: "id" },
+        orderRefundEventV1: { id: "id" },
         syncRunLog: { id: "id" },
     };
 });

@@ -14,6 +14,7 @@ import {
     syncState,
     shopifyOrderRaw,
     orderIncomeV1,
+    orderRefundEventV1,
     syncRunLog,
 } from "../../db/index.js";
 import {
@@ -21,7 +22,10 @@ import {
     JOB_NAME_SYNC_ORDERS_INCOME_V1,
 } from "../../jobs/queues.js";
 import { toMoneyValue } from "../../metrics/moneyValue.js";
-import { listOrders } from "../../services/incomeQueries.js";
+import {
+    listOrders,
+    getShopifyCanonicalParity,
+} from "../../services/incomeQueries.js";
 import { parseLocalDateRangeToUtc } from "../../services/dateRange.js";
 import {
     computeDeltaPercent,
@@ -38,6 +42,32 @@ const daysSchema = z
     .refine((n) => (allowedDays as readonly number[]).includes(n), {
         message: `days must be one of: ${allowedDays.join(", ")}`,
     });
+
+const ACTIVE_SHOPIFY_PARITY_MODEL = "total_base_created_returns" as const;
+
+type ShopifyParityRawMetrics = {
+    grossSales: string;
+    discounts: string;
+    returns: string;
+    netSales: string;
+    shippingCharges: string;
+    returnFees: string;
+    taxes: string;
+    totalSales: string;
+};
+
+function toShopifyParityMoneyValues(metrics: ShopifyParityRawMetrics) {
+    return {
+        grossSales: toMoneyValue(metrics.grossSales),
+        discounts: toMoneyValue(metrics.discounts),
+        returns: toMoneyValue(metrics.returns),
+        netSales: toMoneyValue(metrics.netSales),
+        shippingCharges: toMoneyValue(metrics.shippingCharges),
+        returnFees: toMoneyValue(metrics.returnFees),
+        taxes: toMoneyValue(metrics.taxes),
+        totalSales: toMoneyValue(metrics.totalSales),
+    };
+}
 
 function requireInternalApiKey(
     req: FastifyRequest,
@@ -136,6 +166,9 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
         const [incomeCount] = await db
             .select({ count: sql<number>`count(*)::int` })
             .from(orderIncomeV1);
+        const [refundEventsCount] = await db
+            .select({ count: sql<number>`count(*)::int` })
+            .from(orderRefundEventV1);
         return reply.send({
             shopConfig: config ?? null,
             syncState: state ?? null,
@@ -143,6 +176,7 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
             counts: {
                 shopifyOrderRaw: rawCount?.count ?? 0,
                 orderIncomeV1: incomeCount?.count ?? 0,
+                orderRefundEventV1: refundEventsCount?.count ?? 0,
             },
         });
     });
@@ -335,6 +369,9 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
                     orderRevenue: ReturnType<typeof toMoneyValue>;
                     incomeBruto: ReturnType<typeof toMoneyValue>;
                     refunds: ReturnType<typeof toMoneyValue>;
+                    refundReportedAmount: ReturnType<typeof toMoneyValue>;
+                    refundLineItemsAmount: ReturnType<typeof toMoneyValue>;
+                    refundAdjustmentAmount: ReturnType<typeof toMoneyValue>;
                     incomeNeto: ReturnType<typeof toMoneyValue>;
                     shippingAmount: ReturnType<typeof toMoneyValue>;
                     taxAmount: ReturnType<typeof toMoneyValue>;
@@ -344,24 +381,6 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
                 const exclusionPredicate = includeExcluded
                     ? sql`TRUE`
                     : sql`excluded = false`;
-                const refundAmountExpr = sql`
-                    CASE
-                        WHEN COALESCE(NULLIF(refund_obj->'totalRefundedSet'->'shopMoney'->>'amount', ''), '0')::numeric > 0
-                            THEN COALESCE(NULLIF(refund_obj->'totalRefundedSet'->'shopMoney'->>'amount', ''), '0')::numeric
-                        ELSE COALESCE((
-                            SELECT SUM(
-                                COALESCE(NULLIF(edge->'node'->'subtotalSet'->'shopMoney'->>'amount', ''), '0')::numeric
-                            )
-                            FROM jsonb_array_elements(
-                                CASE
-                                    WHEN jsonb_typeof(refund_obj->'refundLineItems'->'edges') = 'array'
-                                        THEN refund_obj->'refundLineItems'->'edges'
-                                    ELSE '[]'::jsonb
-                                END
-                            ) edge
-                        ), 0)
-                    END
-                `;
 
                 if (granularity === "hour") {
                     const result = await db.execute(sql`
@@ -390,25 +409,24 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
                         ),
                         refund_rows AS (
                             SELECT
-                                date_trunc('hour', ((refund_obj->>'createdAt')::timestamptz AT TIME ZONE ${tz})) AS bucket_local,
-                                ${refundAmountExpr} AS refund_amount
-                            FROM shopify_order_raw raw
-                            INNER JOIN order_income_v1 oi ON oi.shopify_order_id = raw.shopify_order_id
-                            CROSS JOIN LATERAL jsonb_array_elements(
-                                CASE
-                                    WHEN jsonb_typeof(raw.payload->'refunds') = 'array'
-                                        THEN raw.payload->'refunds'
-                                    ELSE '[]'::jsonb
-                                END
-                            ) refund_obj
+                                date_trunc('hour', (rf.refund_created_at AT TIME ZONE ${tz})) AS bucket_local,
+                                rf.refund_effective_amount::numeric AS refund_amount,
+                                rf.refund_reported_amount::numeric AS refund_reported_amount,
+                                rf.refund_line_items_amount::numeric AS refund_line_items_amount,
+                                rf.refund_adjustment_amount::numeric AS refund_adjustment_amount
+                            FROM order_refund_event_v1 rf
+                            INNER JOIN order_income_v1 oi ON oi.shopify_order_id = rf.shopify_order_id
                             WHERE ${exclusionPredicate}
-                                AND (refund_obj->>'createdAt')::timestamptz >= ${sUtc}
-                                AND (refund_obj->>'createdAt')::timestamptz <= ${eUtc}
+                                AND rf.refund_created_at >= ${sUtc}
+                                AND rf.refund_created_at <= ${eUtc}
                         ),
                         refunds_agg AS (
                             SELECT
                                 bucket_local,
-                                SUM(refund_amount)::text AS refunds
+                                SUM(refund_amount)::text AS refunds,
+                                SUM(refund_reported_amount)::text AS refund_reported_amount,
+                                SUM(refund_line_items_amount)::text AS refund_line_items_amount,
+                                SUM(refund_adjustment_amount)::text AS refund_adjustment_amount
                             FROM refund_rows
                             GROUP BY bucket_local
                         )
@@ -418,6 +436,9 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
                             COALESCE(a.line_items_subtotal, '0')::text AS line_items_subtotal,
                             COALESCE(a.income_bruto, '0')::text AS income_bruto,
                             COALESCE(rf.refunds, '0')::text AS refunds,
+                            COALESCE(rf.refund_reported_amount, '0')::text AS refund_reported_amount,
+                            COALESCE(rf.refund_line_items_amount, '0')::text AS refund_line_items_amount,
+                            COALESCE(rf.refund_adjustment_amount, '0')::text AS refund_adjustment_amount,
                             COALESCE(a.income_neto, '0')::text AS income_neto,
                             COALESCE(a.shipping_amount, '0')::text AS shipping_amount,
                             COALESCE(a.tax_amount, '0')::text AS tax_amount,
@@ -441,6 +462,15 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
                                 String(r.income_bruto ?? "0"),
                             ),
                             refunds: toMoneyValue(String(r.refunds ?? "0")),
+                            refundReportedAmount: toMoneyValue(
+                                String(r.refund_reported_amount ?? "0"),
+                            ),
+                            refundLineItemsAmount: toMoneyValue(
+                                String(r.refund_line_items_amount ?? "0"),
+                            ),
+                            refundAdjustmentAmount: toMoneyValue(
+                                String(r.refund_adjustment_amount ?? "0"),
+                            ),
                             incomeNeto: toMoneyValue(
                                 String(r.income_neto ?? "0"),
                             ),
@@ -467,6 +497,9 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
                             orderRevenue: toMoneyValue("0"),
                             incomeBruto: toMoneyValue("0"),
                             refunds: toMoneyValue("0"),
+                            refundReportedAmount: toMoneyValue("0"),
+                            refundLineItemsAmount: toMoneyValue("0"),
+                            refundAdjustmentAmount: toMoneyValue("0"),
                             incomeNeto: toMoneyValue("0"),
                             shippingAmount: toMoneyValue("0"),
                             taxAmount: toMoneyValue("0"),
@@ -500,25 +533,24 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
                     ),
                     refund_rows AS (
                         SELECT
-                            ((refund_obj->>'createdAt')::timestamptz AT TIME ZONE ${tz})::date AS bucket_local_day,
-                            ${refundAmountExpr} AS refund_amount
-                        FROM shopify_order_raw raw
-                        INNER JOIN order_income_v1 oi ON oi.shopify_order_id = raw.shopify_order_id
-                        CROSS JOIN LATERAL jsonb_array_elements(
-                            CASE
-                                WHEN jsonb_typeof(raw.payload->'refunds') = 'array'
-                                    THEN raw.payload->'refunds'
-                                ELSE '[]'::jsonb
-                            END
-                        ) refund_obj
+                            (rf.refund_created_at AT TIME ZONE ${tz})::date AS bucket_local_day,
+                            rf.refund_effective_amount::numeric AS refund_amount,
+                            rf.refund_reported_amount::numeric AS refund_reported_amount,
+                            rf.refund_line_items_amount::numeric AS refund_line_items_amount,
+                            rf.refund_adjustment_amount::numeric AS refund_adjustment_amount
+                        FROM order_refund_event_v1 rf
+                        INNER JOIN order_income_v1 oi ON oi.shopify_order_id = rf.shopify_order_id
                         WHERE ${exclusionPredicate}
-                            AND (refund_obj->>'createdAt')::timestamptz >= ${sUtc}
-                            AND (refund_obj->>'createdAt')::timestamptz <= ${eUtc}
+                            AND rf.refund_created_at >= ${sUtc}
+                            AND rf.refund_created_at <= ${eUtc}
                     ),
                     refunds_agg AS (
                         SELECT
                             bucket_local_day,
-                            SUM(refund_amount)::text AS refunds
+                            SUM(refund_amount)::text AS refunds,
+                            SUM(refund_reported_amount)::text AS refund_reported_amount,
+                            SUM(refund_line_items_amount)::text AS refund_line_items_amount,
+                            SUM(refund_adjustment_amount)::text AS refund_adjustment_amount
                         FROM refund_rows
                         GROUP BY bucket_local_day
                     )
@@ -528,6 +560,9 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
                         COALESCE(a.line_items_subtotal, '0')::text AS line_items_subtotal,
                         COALESCE(a.income_bruto, '0')::text AS income_bruto,
                         COALESCE(rf.refunds, '0')::text AS refunds,
+                        COALESCE(rf.refund_reported_amount, '0')::text AS refund_reported_amount,
+                        COALESCE(rf.refund_line_items_amount, '0')::text AS refund_line_items_amount,
+                        COALESCE(rf.refund_adjustment_amount, '0')::text AS refund_adjustment_amount,
                         COALESCE(a.income_neto, '0')::text AS income_neto,
                         COALESCE(a.shipping_amount, '0')::text AS shipping_amount,
                         COALESCE(a.tax_amount, '0')::text AS tax_amount,
@@ -547,6 +582,15 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
                     ),
                     incomeBruto: toMoneyValue(String(r.income_bruto ?? "0")),
                     refunds: toMoneyValue(String(r.refunds ?? "0")),
+                    refundReportedAmount: toMoneyValue(
+                        String(r.refund_reported_amount ?? "0"),
+                    ),
+                    refundLineItemsAmount: toMoneyValue(
+                        String(r.refund_line_items_amount ?? "0"),
+                    ),
+                    refundAdjustmentAmount: toMoneyValue(
+                        String(r.refund_adjustment_amount ?? "0"),
+                    ),
                     incomeNeto: toMoneyValue(String(r.income_neto ?? "0")),
                     shippingAmount: toMoneyValue(
                         String(r.shipping_amount ?? "0"),
@@ -601,34 +645,32 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
         },
     );
 
-    const summaryV2QuerySchema = z.object({
-        days: z.coerce
-            .number()
-            .int()
-            .refine((n) => (allowedDays as readonly number[]).includes(n))
-            .optional(),
-        from: z
-            .string()
-            .regex(/^\d{4}-\d{2}-\d{2}$/)
-            .optional(),
-        to: z
-            .string()
-            .regex(/^\d{4}-\d{2}-\d{2}$/)
-            .optional(),
-        includeExcluded: z
-            .string()
-            .optional()
-            .default("false")
-            .transform((v) => v === "true" || v === "1"),
-        compare: z
-            .string()
-            .optional()
-            .transform((v) => v === "1" || v === "true"),
-        debug: z
-            .string()
-            .optional()
-            .transform((v) => v === "1" || v === "true"),
-    });
+    const summaryV2QuerySchema = z
+        .object({
+            days: z.coerce
+                .number()
+                .int()
+                .refine((n) => (allowedDays as readonly number[]).includes(n))
+                .optional(),
+            from: z
+                .string()
+                .regex(/^\d{4}-\d{2}-\d{2}$/)
+                .optional(),
+            to: z
+                .string()
+                .regex(/^\d{4}-\d{2}-\d{2}$/)
+                .optional(),
+            includeExcluded: z
+                .string()
+                .optional()
+                .default("false")
+                .transform((v) => v === "true" || v === "1"),
+            compare: z
+                .string()
+                .optional()
+                .transform((v) => v === "1" || v === "true"),
+        })
+        .strict();
 
     /** Summary v2: totals + aovNeto as MoneyValue. Use ?days= or ?from=&to= (same filtering/timezone as v1). */
     fastify.get<{ Querystring: Record<string, string | undefined> }>(
@@ -701,57 +743,104 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
                 sUtc: Date,
                 eUtc: Date,
                 includeExcluded: boolean,
-            ): Promise<string> {
+            ): Promise<{
+                refundsTotal: string;
+                refundsReported: string;
+                refundsFromLineItems: string;
+                refundsFromLineItemsGross: string;
+                refundsAdjustments: string;
+                refundsLineItemsTax: string;
+                refundsShipping: string;
+                refundsShippingTax: string;
+                refundsDuties: string;
+                refundsOrderAdjustments: string;
+                refundsOrderAdjustmentsTax: string;
+            }> {
                 const exclusionPredicate = includeExcluded
                     ? sql`TRUE`
                     : sql`oi.excluded = false`;
                 const resultRefunds = await db.execute(sql`
                     WITH refund_rows AS (
                         SELECT
-                            CASE
-                                WHEN COALESCE(NULLIF(refund_obj->'totalRefundedSet'->'shopMoney'->>'amount', ''), '0')::numeric > 0
-                                    THEN COALESCE(NULLIF(refund_obj->'totalRefundedSet'->'shopMoney'->>'amount', ''), '0')::numeric
-                                ELSE COALESCE((
-                                    SELECT SUM(
-                                        COALESCE(NULLIF(edge->'node'->'subtotalSet'->'shopMoney'->>'amount', ''), '0')::numeric
-                                    )
-                                    FROM jsonb_array_elements(
-                                        CASE
-                                            WHEN jsonb_typeof(refund_obj->'refundLineItems'->'edges') = 'array'
-                                                THEN refund_obj->'refundLineItems'->'edges'
-                                            ELSE '[]'::jsonb
-                                        END
-                                    ) edge
-                                ), 0)
-                            END AS refund_amount
-                        FROM shopify_order_raw raw
-                        INNER JOIN order_income_v1 oi ON oi.shopify_order_id = raw.shopify_order_id
-                        CROSS JOIN LATERAL jsonb_array_elements(
-                            CASE
-                                WHEN jsonb_typeof(raw.payload->'refunds') = 'array'
-                                    THEN raw.payload->'refunds'
-                                ELSE '[]'::jsonb
-                            END
-                        ) refund_obj
+                            rf.refund_effective_amount::numeric AS refund_amount,
+                            rf.refund_reported_amount::numeric AS refund_reported_amount,
+                            rf.refund_line_items_amount::numeric AS refund_line_items_amount,
+                            rf.refund_line_items_gross_amount::numeric AS refund_line_items_gross_amount,
+                            rf.refund_adjustment_amount::numeric AS refund_adjustment_amount,
+                            rf.refund_line_items_tax_amount::numeric AS refund_line_items_tax_amount,
+                            rf.refund_shipping_amount::numeric AS refund_shipping_amount,
+                            rf.refund_shipping_tax_amount::numeric AS refund_shipping_tax_amount,
+                            rf.refund_duties_amount::numeric AS refund_duties_amount,
+                            rf.refund_order_adjustments_amount::numeric AS refund_order_adjustments_amount,
+                            rf.refund_order_adjustments_tax_amount::numeric AS refund_order_adjustments_tax_amount
+                        FROM order_refund_event_v1 rf
+                        INNER JOIN order_income_v1 oi ON oi.shopify_order_id = rf.shopify_order_id
                         WHERE ${exclusionPredicate}
-                            AND (refund_obj->>'createdAt')::timestamptz >= ${sUtc}
-                            AND (refund_obj->>'createdAt')::timestamptz <= ${eUtc}
+                            AND rf.refund_created_at >= ${sUtc}
+                            AND rf.refund_created_at <= ${eUtc}
                     )
-                    SELECT COALESCE(SUM(refund_amount), 0)::text AS refunds_total
+                    SELECT
+                        COALESCE(SUM(refund_amount), 0)::text AS refunds_total,
+                        COALESCE(SUM(refund_reported_amount), 0)::text AS refunds_reported,
+                        COALESCE(SUM(refund_line_items_amount), 0)::text AS refunds_from_line_items,
+                        COALESCE(SUM(refund_line_items_gross_amount), 0)::text AS refunds_from_line_items_gross,
+                        COALESCE(SUM(refund_adjustment_amount), 0)::text AS refunds_adjustments,
+                        COALESCE(SUM(refund_line_items_tax_amount), 0)::text AS refunds_line_items_tax,
+                        COALESCE(SUM(refund_shipping_amount), 0)::text AS refunds_shipping,
+                        COALESCE(SUM(refund_shipping_tax_amount), 0)::text AS refunds_shipping_tax,
+                        COALESCE(SUM(refund_duties_amount), 0)::text AS refunds_duties,
+                        COALESCE(SUM(refund_order_adjustments_amount), 0)::text AS refunds_order_adjustments,
+                        COALESCE(SUM(refund_order_adjustments_tax_amount), 0)::text AS refunds_order_adjustments_tax
                     FROM refund_rows
                 `);
                 const rows =
                     (resultRefunds as { rows: Record<string, unknown>[] })
                         .rows ?? [];
-                return String(rows[0]?.refunds_total ?? "0");
+                return {
+                    refundsTotal: String(rows[0]?.refunds_total ?? "0"),
+                    refundsReported: String(rows[0]?.refunds_reported ?? "0"),
+                    refundsFromLineItems: String(
+                        rows[0]?.refunds_from_line_items ?? "0",
+                    ),
+                    refundsFromLineItemsGross: String(
+                        rows[0]?.refunds_from_line_items_gross ?? "0",
+                    ),
+                    refundsAdjustments: String(
+                        rows[0]?.refunds_adjustments ?? "0",
+                    ),
+                    refundsLineItemsTax: String(
+                        rows[0]?.refunds_line_items_tax ?? "0",
+                    ),
+                    refundsShipping: String(rows[0]?.refunds_shipping ?? "0"),
+                    refundsShippingTax: String(
+                        rows[0]?.refunds_shipping_tax ?? "0",
+                    ),
+                    refundsDuties: String(rows[0]?.refunds_duties ?? "0"),
+                    refundsOrderAdjustments: String(
+                        rows[0]?.refunds_order_adjustments ?? "0",
+                    ),
+                    refundsOrderAdjustmentsTax: String(
+                        rows[0]?.refunds_order_adjustments_tax ?? "0",
+                    ),
+                };
             }
 
             const s = result.summary;
-            const refundsCurrentStr = await getRefundsByCreatedAt(
+            const refundsCurrent = await getRefundsByCreatedAt(
                 startUtc,
                 endUtc,
                 q.includeExcluded,
             );
+
+            const parityCurrentResult = await getShopifyCanonicalParity({
+                startUtc,
+                endUtc,
+                includeExcluded: q.includeExcluded,
+            });
+
+            const selectedParityCurrent: ShopifyParityRawMetrics =
+                parityCurrentResult.metrics;
+
             const ordersIncluded = s.ordersIncluded;
             const incomeNetoStr = s.incomeNeto;
             const aovNetoStr =
@@ -764,7 +853,35 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
                 currencyCode: s.currencyCode,
                 orderRevenue: toMoneyValue(s.lineItemsSubtotal),
                 incomeBruto: toMoneyValue(s.incomeBruto),
-                refunds: toMoneyValue(refundsCurrentStr),
+                refunds: toMoneyValue(refundsCurrent.refundsTotal),
+                refundsReportedAmount: toMoneyValue(
+                    refundsCurrent.refundsReported,
+                ),
+                refundsLineItemsAmount: toMoneyValue(
+                    refundsCurrent.refundsFromLineItems,
+                ),
+                refundsLineItemsGrossAmount: toMoneyValue(
+                    refundsCurrent.refundsFromLineItemsGross,
+                ),
+                refundsAdjustmentsAmount: toMoneyValue(
+                    refundsCurrent.refundsAdjustments,
+                ),
+                refundsLineItemsTaxAmount: toMoneyValue(
+                    refundsCurrent.refundsLineItemsTax,
+                ),
+                refundsShippingAmount: toMoneyValue(
+                    refundsCurrent.refundsShipping,
+                ),
+                refundsShippingTaxAmount: toMoneyValue(
+                    refundsCurrent.refundsShippingTax,
+                ),
+                refundsDutiesAmount: toMoneyValue(refundsCurrent.refundsDuties),
+                refundsOrderAdjustmentsAmount: toMoneyValue(
+                    refundsCurrent.refundsOrderAdjustments,
+                ),
+                refundsOrderAdjustmentsTaxAmount: toMoneyValue(
+                    refundsCurrent.refundsOrderAdjustmentsTax,
+                ),
                 incomeNeto: toMoneyValue(s.incomeNeto),
                 shippingAmount: toMoneyValue(s.shippingAmount),
                 taxAmount: toMoneyValue(s.taxAmount),
@@ -772,6 +889,11 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
                 ordersIncluded: s.ordersIncluded,
                 ordersExcludedInRange: s.ordersExcludedInRange,
                 aovNeto: toMoneyValue(aovNetoStr),
+                shopifyParityModel: ACTIVE_SHOPIFY_PARITY_MODEL,
+                ordersCountParity: parityCurrentResult.ordersCreatedInRange,
+                shopifyParity: toShopifyParityMoneyValues(
+                    selectedParityCurrent,
+                ),
             };
 
             if (q.compare) {
@@ -793,7 +915,7 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
                         pageSize: 1,
                     });
                     const sp = resultPrev.summary;
-                    const refundsPrevStr = await getRefundsByCreatedAt(
+                    const refundsPrev = await getRefundsByCreatedAt(
                         rangePrev.startUtc,
                         rangePrev.endUtc,
                         q.includeExcluded,
@@ -804,18 +926,60 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
                                   .div(sp.ordersIncluded)
                                   .toFixed(6)
                             : "0.000000";
+                    const parityPrevResult = await getShopifyCanonicalParity({
+                        startUtc: rangePrev.startUtc,
+                        endUtc: rangePrev.endUtc,
+                        includeExcluded: q.includeExcluded,
+                    });
+
+                    const parityPrev: ShopifyParityRawMetrics =
+                        parityPrevResult.metrics;
+
+                    const parityCurrent: ShopifyParityRawMetrics =
+                        selectedParityCurrent;
 
                     payload.comparisonRange = { from: fromPrev, to: toPrev };
                     payload.comparison = {
                         orderRevenue: toMoneyValue(sp.lineItemsSubtotal),
                         incomeBruto: toMoneyValue(sp.incomeBruto),
-                        refunds: toMoneyValue(refundsPrevStr),
+                        refunds: toMoneyValue(refundsPrev.refundsTotal),
+                        refundsReportedAmount: toMoneyValue(
+                            refundsPrev.refundsReported,
+                        ),
+                        refundsLineItemsAmount: toMoneyValue(
+                            refundsPrev.refundsFromLineItems,
+                        ),
+                        refundsLineItemsGrossAmount: toMoneyValue(
+                            refundsPrev.refundsFromLineItemsGross,
+                        ),
+                        refundsAdjustmentsAmount: toMoneyValue(
+                            refundsPrev.refundsAdjustments,
+                        ),
+                        refundsLineItemsTaxAmount: toMoneyValue(
+                            refundsPrev.refundsLineItemsTax,
+                        ),
+                        refundsShippingAmount: toMoneyValue(
+                            refundsPrev.refundsShipping,
+                        ),
+                        refundsShippingTaxAmount: toMoneyValue(
+                            refundsPrev.refundsShippingTax,
+                        ),
+                        refundsDutiesAmount: toMoneyValue(
+                            refundsPrev.refundsDuties,
+                        ),
+                        refundsOrderAdjustmentsAmount: toMoneyValue(
+                            refundsPrev.refundsOrderAdjustments,
+                        ),
+                        refundsOrderAdjustmentsTaxAmount: toMoneyValue(
+                            refundsPrev.refundsOrderAdjustmentsTax,
+                        ),
                         incomeNeto: toMoneyValue(sp.incomeNeto),
                         shippingAmount: toMoneyValue(sp.shippingAmount),
                         taxAmount: toMoneyValue(sp.taxAmount),
                         discountAmount: toMoneyValue(sp.discountAmount),
                         ordersIncluded: sp.ordersIncluded,
                         aovNeto: toMoneyValue(aovPrevStr),
+                        shopifyParity: toShopifyParityMoneyValues(parityPrev),
                     };
 
                     payload.deltas = {
@@ -828,8 +992,48 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
                             sp.incomeBruto,
                         ),
                         refunds: computeDeltaPercent(
-                            refundsCurrentStr,
-                            refundsPrevStr,
+                            refundsCurrent.refundsTotal,
+                            refundsPrev.refundsTotal,
+                        ),
+                        refundsReportedAmount: computeDeltaPercent(
+                            refundsCurrent.refundsReported,
+                            refundsPrev.refundsReported,
+                        ),
+                        refundsLineItemsAmount: computeDeltaPercent(
+                            refundsCurrent.refundsFromLineItems,
+                            refundsPrev.refundsFromLineItems,
+                        ),
+                        refundsLineItemsGrossAmount: computeDeltaPercent(
+                            refundsCurrent.refundsFromLineItemsGross,
+                            refundsPrev.refundsFromLineItemsGross,
+                        ),
+                        refundsAdjustmentsAmount: computeDeltaPercent(
+                            refundsCurrent.refundsAdjustments,
+                            refundsPrev.refundsAdjustments,
+                        ),
+                        refundsLineItemsTaxAmount: computeDeltaPercent(
+                            refundsCurrent.refundsLineItemsTax,
+                            refundsPrev.refundsLineItemsTax,
+                        ),
+                        refundsShippingAmount: computeDeltaPercent(
+                            refundsCurrent.refundsShipping,
+                            refundsPrev.refundsShipping,
+                        ),
+                        refundsShippingTaxAmount: computeDeltaPercent(
+                            refundsCurrent.refundsShippingTax,
+                            refundsPrev.refundsShippingTax,
+                        ),
+                        refundsDutiesAmount: computeDeltaPercent(
+                            refundsCurrent.refundsDuties,
+                            refundsPrev.refundsDuties,
+                        ),
+                        refundsOrderAdjustmentsAmount: computeDeltaPercent(
+                            refundsCurrent.refundsOrderAdjustments,
+                            refundsPrev.refundsOrderAdjustments,
+                        ),
+                        refundsOrderAdjustmentsTaxAmount: computeDeltaPercent(
+                            refundsCurrent.refundsOrderAdjustmentsTax,
+                            refundsPrev.refundsOrderAdjustmentsTax,
                         ),
                         incomeNeto: computeDeltaPercent(
                             s.incomeNeto,
@@ -852,6 +1056,40 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
                             sp.ordersIncluded,
                         ),
                         aovNeto: computeDeltaPercent(aovNetoStr, aovPrevStr),
+                        shopifyParity: {
+                            grossSales: computeDeltaPercent(
+                                parityCurrent.grossSales,
+                                parityPrev.grossSales,
+                            ),
+                            discounts: computeDeltaPercent(
+                                parityCurrent.discounts,
+                                parityPrev.discounts,
+                            ),
+                            returns: computeDeltaPercent(
+                                parityCurrent.returns,
+                                parityPrev.returns,
+                            ),
+                            netSales: computeDeltaPercent(
+                                parityCurrent.netSales,
+                                parityPrev.netSales,
+                            ),
+                            shippingCharges: computeDeltaPercent(
+                                parityCurrent.shippingCharges,
+                                parityPrev.shippingCharges,
+                            ),
+                            returnFees: computeDeltaPercent(
+                                parityCurrent.returnFees,
+                                parityPrev.returnFees,
+                            ),
+                            taxes: computeDeltaPercent(
+                                parityCurrent.taxes,
+                                parityPrev.taxes,
+                            ),
+                            totalSales: computeDeltaPercent(
+                                parityCurrent.totalSales,
+                                parityPrev.totalSales,
+                            ),
+                        },
                     };
                 } catch (e) {
                     payload.comparisonRange = { from: fromPrev, to: toPrev };
@@ -860,12 +1098,6 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
                 }
             }
 
-            if (q.debug) {
-                payload.window_utc = {
-                    start: startUtc.toISOString(),
-                    end: endUtc.toISOString(),
-                };
-            }
             return reply.send(payload);
         },
     );

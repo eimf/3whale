@@ -39,6 +39,44 @@ Este documento es la fuente de verdad para el contrato de series diarias/horaria
     - Fallback: si base = `0`, usar suma de `refund.refundLineItems[].subtotalSet.shopMoney.amount`.
 - Esto alinea mejor el KPI de Returns con lo observado en Shopify Analytics cuando `totalRefundedSet` llega en cero pero existen líneas de devolución.
 
+### Desglose adicional de refunds (v2 enriquecido)
+
+Además de `refunds` (monto efectivo usado por KPI), las respuestas exponen desglose:
+
+- `refundReportedAmount`: suma de `totalRefundedSet.shopMoney.amount`.
+- `refundLineItemsAmount`: suma de `refundLineItems[].subtotalSet.shopMoney.amount`.
+- `refundAdjustmentAmount`: `refundReportedAmount - refundLineItemsAmount`.
+
+En `summary-v2` estos campos aparecen como:
+
+- `refundsReportedAmount`
+- `refundsLineItemsAmount`
+- `refundsAdjustmentsAmount`
+- `refundsLineItemsTaxAmount`
+- `refundsShippingAmount`
+- `refundsShippingTaxAmount`
+- `refundsDutiesAmount`
+- `refundsOrderAdjustmentsAmount`
+- `refundsOrderAdjustmentsTaxAmount`
+
+Todos son `MoneyValue` (`{ raw, display }`) y respetan `includeExcluded` y el bucket por `refund.createdAt`.
+
+El bloque `shopifyParity` de `summary-v2` usa un **modelo canónico único** alineado a Shopify day-summary:
+
+- `shopifyParityModel = total_base_created_returns`.
+- Base de orden por día de orden (`Order.createdAt`): `subtotalPriceSet + totalDiscountsSet` (campos `total*` de Shopify), no `current*`.
+- Returns por día de creación de refund (`Refund.createdAt`): `refund_line_items_gross_amount` (de `order_refund_event_v1`).
+- `discounts` y `returns` se exponen con signo negativo (convención Shopify).
+- `netSales = grossSales + discounts + returns`.
+- `shippingCharges = shipping_total - refunds_shipping_created`.
+- `taxes = tax_total - refunds_line_items_tax - refunds_shipping_tax - refunds_duties - refunds_order_adjustments_tax`.
+- `returnFees = max(refunds_order_adjustments_amount, 0)`.
+- `totalSales = netSales + shippingCharges + taxes + returnFees`.
+
+`/internal/income/summary-v2` ya no acepta selección de modelo (`parityModel`) ni salida de candidatos (`debug`) para evitar fugas de rutas legacy.
+
+Para la definición completa y reglas de signo/atribución, ver `docs/metrics/shopify_canonical_semantics.md`.
+
 ## 4) Contrato de bucket (hour)
 
 > Terminología: **bucketKey** = identificador temporal del bucket.

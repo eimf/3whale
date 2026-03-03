@@ -36,6 +36,15 @@ function refund(amount: string, id = "r1"): ShopifyRefundNormalized {
     return {
         id: `gid://shopify/Refund/${id}`,
         createdAt: iso,
+        reportedAmount: { amount, currencyCode: MXN },
+        lineItemsAmount: { amount, currencyCode: MXN },
+        lineItemsTaxAmount: { amount: "0", currencyCode: MXN },
+        shippingAmount: { amount: "0", currencyCode: MXN },
+        shippingTaxAmount: { amount: "0", currencyCode: MXN },
+        dutiesAmount: { amount: "0", currencyCode: MXN },
+        orderAdjustmentsAmount: { amount: "0", currencyCode: MXN },
+        orderAdjustmentsTaxAmount: { amount: "0", currencyCode: MXN },
+        adjustmentAmount: { amount: "0", currencyCode: MXN },
         amount: { amount, currencyCode: MXN },
     };
 }

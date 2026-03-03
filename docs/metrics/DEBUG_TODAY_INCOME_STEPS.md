@@ -67,10 +67,28 @@ To see the window the API used for a request:
 
 ```bash
 curl -s -H "x-internal-api-key: YOUR_KEY" \
-  "http://localhost:3000/internal/income/summary-v2?days=1&debug=1"
+  "http://localhost:3000/internal/income/summary-v2?days=1"
 ```
 
-Response includes `window_utc: { start, end }`. Use those timestamps in Shopify (or in the DB) to verify which orders are included.
+Response includes `range: { from, to, timezone }` and `shopifyParity`. For exact UTC bounds, use `GET /internal/income/reconcile?from=YYYY-MM-DD&to=YYYY-MM-DD` and read `range.window_utc`.
+
+## Step 5: Parity contributor breakdown (returns uplift)
+
+To inspect which orders/refunds are driving Shopify parity differences (especially Returns):
+
+```bash
+curl -s -H "x-internal-api-key: YOUR_KEY" \
+  "http://localhost:3000/internal/income/reconcile-parity?from=YYYY-MM-DD&to=YYYY-MM-DD&includeExcluded=true&limit=200"
+```
+
+This endpoint returns:
+
+- `totals.returnsNetTotal` (line-item refunded net)
+- `totals.returnsGrossTotal` (line-item refunded gross/original)
+- `totals.returnsUpliftTotal` (`gross - net`)
+- `rows[]` ordered by `returnsUplift` desc, with per-order refund components.
+
+Use it to identify exact orders responsible for the remaining Shopify Returns gap.
 
 ---
 

@@ -20,10 +20,14 @@ export function getTodayInTz(timezone: string): string {
 
 /** Yesterday's date (YYYY-MM-DD) in the given IANA timezone. */
 export function getYesterdayInTz(timezone: string): string {
-    const today = getTodayInTz(timezone);
-    const d = new Date(today + "T12:00:00");
-    d.setDate(d.getDate() - 1);
-    return d.toISOString().slice(0, 10);
+    const formatter = new Intl.DateTimeFormat("en-CA", {
+        timeZone: timezone,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+    });
+    const yesterdayMs = Date.now() - 24 * 60 * 60 * 1000;
+    return formatter.format(new Date(yesterdayMs));
 }
 
 /** First and last day of previous month in the given IANA timezone. */

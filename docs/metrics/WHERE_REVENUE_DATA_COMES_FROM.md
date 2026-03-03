@@ -2,6 +2,8 @@
 
 You see **180,019.35** in Shopify for “today’s revenue”. Here’s exactly where the app gets its number and why it might not match.
 
+For the strict parity contract used by `summary-v2.shopifyParity` (formulas, sign conventions, and attribution timing), use `docs/metrics/shopify_canonical_semantics.md` as the source of truth.
+
 ---
 
 ## 1. Source of truth: Shopify → our DB → API → dashboard
@@ -157,11 +159,10 @@ So the same period can differ for these reasons:
 
 To verify that our “today” income matches Shopify for the same window:
 
-1. **Get our window and totals (with exact UTC bounds)**  
-   Call **`GET /internal/income/summary-v2?days=1&debug=1`** (with `x-internal-api-key`). You get:
+1. **Get our window and totals**  
+   Call **`GET /internal/income/summary-v2?days=1`** (with `x-internal-api-key`). You get:
     - **range**: `from`, `to`, `timezone` (e.g. `America/Mexico_City`)
-    - **window_utc**: `start`, `end` (ISO 8601) — the exact UTC bounds used for the DB filter
-    - **ordersIncluded**, **incomeNeto**, **incomeBruto**, **refunds**, etc.
+    - **ordersIncluded**, **incomeNeto**, **incomeBruto**, **refunds**, `shopifyParity`, etc.
 
 2. **Reconcile full calendar “today” (optional)**  
    For the **full** calendar day in shop TZ (00:00–23:59:59), call:
@@ -221,5 +222,5 @@ The app dashboard is aligned with Shopify Analytics terminology and layout so yo
 
 1. **Metric alignment**: First dashboard card labeled “Order Revenue” now shows **incomeNeto** (net after refunds) so it matches Shopify’s “Order Revenue”. No backend change; frontend uses `summary.incomeNeto.display` for that card.
 2. **Default range**: Dashboard default is **Today** (`rangeDays: 1`) so the default view matches “today” in shop timezone.
-3. **Reconciliation**: Use `GET /internal/income/summary-v2?days=1&debug=1` to get `window_utc.start` / `window_utc.end` (ISO) and compare with Shopify for the same window. Use `GET /internal/income/reconcile?from=YYYY-MM-DD&to=YYYY-MM-DD` for full-day totals; response now includes `range.window_utc`.
+3. **Reconciliation**: Use `GET /internal/income/summary-v2?days=1` for current totals and parity fields. Use `GET /internal/income/reconcile?from=YYYY-MM-DD&to=YYYY-MM-DD` for full-day totals; response includes `range.window_utc`.
 4. **Tests**: `src/services/__tests__/dateRange.test.ts` (Mexico TZ, same-day and multi-day); `src/api/__tests__/todayWindow.test.ts` (today = start of day to “now” in shop TZ). Decimal-safe aggregation is covered by existing `computeIncomeComponents` tests and NUMERIC schema.
