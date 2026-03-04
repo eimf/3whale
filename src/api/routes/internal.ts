@@ -26,6 +26,7 @@ import {
     listOrders,
     getShopifyCanonicalParity,
 } from "../../services/incomeQueries.js";
+import { getShopifyQLMetrics } from "../../shopify/client/shopifyqlClient.js";
 import { parseLocalDateRangeToUtc } from "../../services/dateRange.js";
 import {
     computeDeltaPercent,
@@ -832,10 +833,18 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
                 q.includeExcluded,
             );
 
+            const shopifyqlMetrics = await getShopifyQLMetrics({
+                shopDomain: config.shopDomain,
+                accessToken: process.env.SHOPIFY_ADMIN_ACCESS_TOKEN ?? "",
+                fromDate: from,
+                toDate: to,
+            });
+
             const parityCurrentResult = await getShopifyCanonicalParity({
                 startUtc,
                 endUtc,
                 includeExcluded: q.includeExcluded,
+                shopifyqlMetrics: shopifyqlMetrics ?? undefined,
             });
 
             const selectedParityCurrent: ShopifyParityRawMetrics =
@@ -926,10 +935,19 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
                                   .div(sp.ordersIncluded)
                                   .toFixed(6)
                             : "0.000000";
+                    const shopifyqlMetricsPrev = await getShopifyQLMetrics({
+                        shopDomain: config.shopDomain,
+                        accessToken:
+                            process.env.SHOPIFY_ADMIN_ACCESS_TOKEN ?? "",
+                        fromDate: fromPrev,
+                        toDate: toPrev,
+                    });
                     const parityPrevResult = await getShopifyCanonicalParity({
                         startUtc: rangePrev.startUtc,
                         endUtc: rangePrev.endUtc,
                         includeExcluded: q.includeExcluded,
+                        shopifyqlMetrics:
+                            shopifyqlMetricsPrev ?? undefined,
                     });
 
                     const parityPrev: ShopifyParityRawMetrics =

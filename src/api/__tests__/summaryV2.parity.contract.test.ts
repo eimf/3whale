@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => {
 
     const listOrders = vi.fn();
     const getShopifyCanonicalParity = vi.fn();
+    const getShopifyQLMetrics = vi.fn();
 
     return {
         limit,
@@ -19,6 +20,7 @@ const mocks = vi.hoisted(() => {
         execute,
         listOrders,
         getShopifyCanonicalParity,
+        getShopifyQLMetrics,
     };
 });
 
@@ -44,6 +46,12 @@ vi.mock("../../services/incomeQueries.js", () => {
     };
 });
 
+vi.mock("../../shopify/client/shopifyqlClient.js", () => {
+    return {
+        getShopifyQLMetrics: mocks.getShopifyQLMetrics,
+    };
+});
+
 describe("GET /internal/income/summary-v2 parity invariants", () => {
     beforeEach(() => {
         vi.resetModules();
@@ -54,10 +62,14 @@ describe("GET /internal/income/summary-v2 parity invariants", () => {
         mocks.execute.mockClear();
         mocks.listOrders.mockClear();
         mocks.getShopifyCanonicalParity.mockClear();
+        mocks.getShopifyQLMetrics.mockClear();
+
+        mocks.getShopifyQLMetrics.mockResolvedValue(null);
 
         mocks.limit.mockResolvedValue([
             {
                 id: "singleton",
+                shopDomain: "test.myshopify.com",
                 timezoneIana: "America/Mexico_City",
                 currencyCode: "MXN",
             },

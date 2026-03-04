@@ -112,7 +112,7 @@ export async function registerAuthRoutes(fastify: FastifyInstance) {
             const clientId = getClientId();
             const redirectUri = "http://localhost:3000/auth/callback";
             const state = Math.random().toString(36).slice(2);
-            const authUrl = `https://${shopNorm}/admin/oauth/authorize?client_id=${encodeURIComponent(clientId)}&scope=read_orders&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}`;
+            const authUrl = `https://${shopNorm}/admin/oauth/authorize?client_id=${encodeURIComponent(clientId)}&scope=read_orders,read_reports&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}`;
             return reply.redirect(authUrl, 302);
           } catch (err) {
             return reply.code(500).type("text/html").send(
