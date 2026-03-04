@@ -22,7 +22,7 @@ The script prints:
 
 **Compare:**
 
-- Script’s **SUM(income_neto)** vs what the **API** returns for `GET /internal/income/summary-v2?days=1` (field `incomeNeto.display`). They must match; if not, the API or BFF is wrong.
+- Script’s **SUM(income_neto)** vs what the **API** returns for `GET /internal/income/summary-v2?days=1` (field `orderRevenue.display` / `incomeNeto.display`). They must match; if not, the API or BFF is wrong.
 - Script’s **SUM(income_neto)** and **order count** vs **Shopify** "Order Revenue" and "Orders" for the same day in the **store’s timezone**. Use the script’s `window_utc.start` / `window_utc.end` to know which orders we’re including (Shopify uses `processed_at` / payment date).
 
 ---
@@ -67,19 +67,37 @@ To see the window the API used for a request:
 
 ```bash
 curl -s -H "x-internal-api-key: YOUR_KEY" \
-  "http://localhost:3000/internal/income/summary-v2?days=1&debug=1"
+  "http://localhost:3000/internal/income/summary-v2?days=1"
 ```
 
-Response includes `window_utc: { start, end }`. Use those timestamps in Shopify (or in the DB) to verify which orders are included.
+Response includes `range: { from, to, timezone }` and `shopifyParity`. For exact UTC bounds, use `GET /internal/income/reconcile?from=YYYY-MM-DD&to=YYYY-MM-DD` and read `range.window_utc`.
+
+## Step 5: Parity contributor breakdown (returns uplift)
+
+To inspect which orders/refunds are driving Shopify parity differences (especially Returns):
+
+```bash
+curl -s -H "x-internal-api-key: YOUR_KEY" \
+  "http://localhost:3000/internal/income/reconcile-parity?from=YYYY-MM-DD&to=YYYY-MM-DD&includeExcluded=true&limit=200"
+```
+
+This endpoint returns:
+
+- `totals.returnsNetTotal` (line-item refunded net)
+- `totals.returnsGrossTotal` (line-item refunded gross/original)
+- `totals.returnsUpliftTotal` (`gross - net`)
+- `rows[]` ordered by `returnsUplift` desc, with per-order refund components.
+
+Use it to identify exact orders responsible for the remaining Shopify Returns gap.
 
 ---
 
 ## Checklist
 
-| Check | What to do |
-|-------|------------|
-| Script SUM(income_neto) = API incomeNeto? | If no → API/BFF bug. If yes → go to next. |
-| Script order count = Shopify Orders (today)? | If no → timezone, date type, or sync. |
+| Check                                            | What to do                                           |
+| ------------------------------------------------ | ---------------------------------------------------- |
+| Script SUM(income_neto) = API orderRevenue?      | If no → API/BFF bug. If yes → go to next.            |
+| Script order count = Shopify Orders (today)?     | If no → timezone, date type, or sync.                |
 | Script SUM(income_neto) ≈ Shopify Order Revenue? | If no → definition (tax, exclusions) or sync/window. |
-| last_sync_finished_at recent? | If no → run sync and re-run script. |
-| timezone_iana correct for store? | If no → fix via bootstrap / config. |
+| last_sync_finished_at recent?                    | If no → run sync and re-run script.                  |
+| timezone_iana correct for store?                 | If no → fix via bootstrap / config.                  |

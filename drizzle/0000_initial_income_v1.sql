@@ -47,6 +47,31 @@ CREATE TABLE IF NOT EXISTS "order_income_v1" (
 CREATE INDEX IF NOT EXISTS "order_income_v1_processed_at" ON "order_income_v1" ("processed_at");
 CREATE INDEX IF NOT EXISTS "order_income_v1_excluded" ON "order_income_v1" ("excluded");
 
+CREATE TABLE IF NOT EXISTS "order_refund_event_v1" (
+  "shopify_refund_id" text PRIMARY KEY NOT NULL,
+  "shopify_order_id" text NOT NULL,
+  "refund_created_at" timestamptz NOT NULL,
+  "processed_at" timestamptz NOT NULL,
+  "currency_code" text NOT NULL,
+  "refund_reported_amount" numeric(20, 6) NOT NULL,
+  "refund_line_items_amount" numeric(20, 6) NOT NULL,
+  "refund_line_items_tax_amount" numeric(20, 6) NOT NULL,
+  "refund_shipping_amount" numeric(20, 6) NOT NULL,
+  "refund_shipping_tax_amount" numeric(20, 6) NOT NULL,
+  "refund_duties_amount" numeric(20, 6) NOT NULL,
+  "refund_order_adjustments_amount" numeric(20, 6) NOT NULL,
+  "refund_order_adjustments_tax_amount" numeric(20, 6) NOT NULL,
+  "refund_effective_amount" numeric(20, 6) NOT NULL,
+  "refund_adjustment_amount" numeric(20, 6) NOT NULL,
+  "payload" jsonb NOT NULL,
+  "created_at" timestamptz NOT NULL DEFAULT now(),
+  "updated_at" timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS "order_refund_event_v1_refund_created_at" ON "order_refund_event_v1" ("refund_created_at");
+CREATE INDEX IF NOT EXISTS "order_refund_event_v1_processed_at" ON "order_refund_event_v1" ("processed_at");
+CREATE INDEX IF NOT EXISTS "order_refund_event_v1_shopify_order_id" ON "order_refund_event_v1" ("shopify_order_id");
+
 CREATE TABLE IF NOT EXISTS "sync_run_log" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
   "started_at" timestamptz NOT NULL,
