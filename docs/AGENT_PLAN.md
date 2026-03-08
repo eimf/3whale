@@ -38,7 +38,7 @@
 **Ops**:
 - Verify Docker services (Postgres :5433, Redis :6379) are running
 - Confirm migrations are applied
-- Run `npm run print-summary -- --from 2026-02-28 --to 2026-02-28` and capture current output
+- Run `pnpm run print-summary -- --from 2026-02-28 --to 2026-02-28` and capture current output
 - Document any service issues
 
 **Analyst**:
@@ -54,7 +54,7 @@
 
 **Builder**:
 - Implement fixes per Analyst's plan
-- Run tests (`npm run test`)
+- Run tests (`pnpm run test`)
 - Run print-summary to verify metrics match
 - Document what changed and why
 

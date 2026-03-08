@@ -11,6 +11,7 @@ Node.js, TypeScript, Fastify, Drizzle + Postgres, BullMQ + Redis, zod, luxon, pi
 ## Prerequisites
 
 - Node.js 18+
+- pnpm (recommended; the repo uses pnpm — lockfiles: `pnpm-lock.yaml`)
 - Docker (for Postgres + Redis)
 
 ## Backend
@@ -26,22 +27,25 @@ docker compose up -d
 #    Optional: PORT, SHOPIFY_API_VERSION, SHOPIFY_SYNC_*, SHOPIFY_CLIENT_ID, SHOPIFY_CLIENT_SECRET
 
 # 3. Run migrations
-npm run db:migrate
+pnpm run db:migrate
 
 # 4. Terminal 1: start API (port 3000)
-npm run dev:api
+pnpm run dev:api
 
 # 5. Terminal 2: start worker
-npm run dev:worker
+pnpm run dev:worker
 ```
 
 ## Web frontend (apps/web)
 
 ```bash
 cd apps/web
-npm install
-# Create .env.local with INTERNAL_API_BASE_URL (e.g. http://localhost:3000) and INTERNAL_API_KEY
-npm run dev
+pnpm install
+# Create .env.local with:
+#   AUTH_JWT_SECRET (required — long random string for JWT signing)
+#   DATABASE_URL (required for login — same Postgres as backend)
+#   INTERNAL_API_BASE_URL (e.g. http://localhost:3000), INTERNAL_API_KEY
+pnpm run dev
 ```
 
 - Dev server: **http://localhost:3001**
@@ -84,8 +88,27 @@ curl -s "http://localhost:3000/internal/income/daily?days=7" \
 ## Migrations
 
 - Migrations are plain SQL in `drizzle/*.sql`.
-- Run all: `npm run db:migrate` (currently runs `drizzle/0000_initial_income_v1.sql`).
+- Run all from repo root: `pnpm run db:migrate`. This runs all numbered SQL files including `admin_user` (for web app login).
 - If you had an older multi-shop schema, drop the old tables before re-running migrations.
+
+## Admin user bootstrap (web app login)
+
+To create or update the single admin user used by `apps/web` login:
+
+```bash
+# From repo root; set env vars (or use .env)
+ADMIN_EMAIL=your@email.com ADMIN_PASSWORD='YourSecurePass1!' pnpm run bootstrap:admin
+```
+
+- Reads `ADMIN_EMAIL`, `ADMIN_PASSWORD`, and `DATABASE_URL` from the environment.
+- Password rules: min 8, max 15 chars; at least one uppercase, one number, one special character; no spaces.
+- Stores an argon2id hash in `admin_user`; safe to run again to change password. Do **not** commit credentials.
+
+## Web app auth (apps/web)
+
+- In `apps/web`, set `AUTH_JWT_SECRET` (required) and `DATABASE_URL` (required for login) in `.env.local` or your deployment.
+- After migrations and bootstrap, open the web app → **Login** → sign in with the admin email/password.
+- **Logout** in the dashboard clears the session and redirects to `/login`.
 
 ## Acceptance (E2E)
 
@@ -105,6 +128,10 @@ curl -s "http://localhost:3000/internal/income/daily?days=7" \
 | POST   | /internal/sync/run                         | Enqueue sync job; returns `{ jobId }`. Optional `?fullSync=true` to reset watermark and re-fetch last 90 days (reconcile). |
 | GET    | /internal/sync-status                      | shop_config, sync_state, last 10 run logs, counts |
 | GET    | /internal/income/daily?days=1\|2\|3\|7\|30 | Daily income series (strings, excluded=false)     |
+
+## Deployment
+
+See **docs/DEPLOYMENT.md** for production checklist: env vars, migrations, bootstrap, API/worker start commands, and web app (e.g. Vercel).
 
 ## Store target (hard requirements)
 

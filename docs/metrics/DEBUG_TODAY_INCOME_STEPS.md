@@ -9,7 +9,7 @@ When the dashboard "Order Revenue" (today) doesn’t match Shopify, follow these
 From repo root (with `.env` and `DATABASE_URL` set):
 
 ```bash
-npm run debug:today
+pnpm run debug:today
 ```
 
 The script prints:
@@ -43,7 +43,7 @@ Then the problem is either:
 
 - If **order count** in the script is 0 or much lower than Shopify, run sync:  
   `POST /internal/sync/run`  
-  Then run `npm run debug:today` again and re-check.
+  Then run `pnpm run debug:today` again and re-check.
 
 **C) Metric definition**
 

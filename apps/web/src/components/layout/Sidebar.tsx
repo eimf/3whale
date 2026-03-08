@@ -40,11 +40,11 @@ export function Sidebar({ isCollapsed, onCollapsedChange, mobileOpen, onMobileCl
     }
   };
 
-  const isSummaryActive = pathname === "/" || pathname === "/dashboard";
+  const isSummaryActive = pathname === "/dashboard";
 
   const summaryLink = (
     <Link
-      href="/"
+      href="/dashboard"
       onClick={mobileOpen ? onMobileClose : undefined}
       className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors ${
         isSummaryActive

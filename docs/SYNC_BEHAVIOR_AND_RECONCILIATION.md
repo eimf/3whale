@@ -9,7 +9,7 @@
 3. **Backend** (`src/api/routes/internal.ts`):
    - **Enqueues** a BullMQ job: `queue.add("syncOrdersIncomeV1", {})`
    - Returns `{ jobId }` immediately. It does **not** run the sync in the API process.
-4. A **worker process** must be running (`npm run dev:worker`) that consumes the `shopify-sync` queue. When it picks up the job, it runs the **same** processor: `syncOrdersIncomeV1()` in `src/jobs/processors/syncOrdersIncomeV1.ts`.
+4. A **worker process** must be running (`pnpm run dev:worker`) that consumes the `shopify-sync` queue. When it picks up the job, it runs the **same** processor: `syncOrdersIncomeV1()` in `src/jobs/processors/syncOrdersIncomeV1.ts`.
 
 So:
 
@@ -23,7 +23,7 @@ Same logic, different invocation: **queue + worker** vs **direct call**.
 ## Why the UI sync might not update the data
 
 1. **No worker running**  
-   If nothing is running `npm run dev:worker`, the job stays in Redis and is never processed. The UI still gets `200` and `{ jobId }`, shows “Sync started”, but no sync runs. This is the most likely reason the data didn’t update when using the UI.
+   If nothing is running `pnpm run dev:worker`, the job stays in Redis and is never processed. The UI still gets `200` and `{ jobId }`, shows “Sync started”, but no sync runs. This is the most likely reason the data didn’t update when using the UI.
 
 2. **Worker was failing before the fix**  
    If the worker was running but the job was failing (e.g. `numberOfOrders` string vs number), `last_sync_status` would be `failure` and the watermark wouldn’t advance. The script you ran later bypassed the queue and ran the fixed code directly, so it succeeded.
