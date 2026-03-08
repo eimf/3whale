@@ -120,7 +120,40 @@ export const OrderNodeForIncomeV1Schema = z.object({
         })
         .nullable()
         .optional(),
+    customer: z
+        .object({
+            id: z.string(),
+            /** Shopify can return this as string or number; coerce so both pass. */
+            numberOfOrders: z
+                .optional(
+                    z
+                        .union([z.string(), z.number()])
+                        .transform((v) =>
+                            typeof v === "string" ? parseInt(v, 10) : v,
+                        )
+                        .pipe(z.number().int()),
+                ),
+        })
+        .nullable()
+        .optional(),
+    lineItems: z
+        .object({
+            edges: z
+                .array(
+                    z.object({
+                        node: z.object({
+                            quantity: z.number().int().optional(),
+                        }),
+                    }),
+                )
+                .optional()
+                .default([]),
+        })
+        .optional(),
     currentSubtotalPriceSet: MoneySetSchema.nullable().optional(),
+    subtotalPriceSet: MoneySetSchema.nullable().optional(),
+    totalShippingPriceSet: MoneySetSchema.nullable().optional(),
+    totalTaxSet: MoneySetSchema.nullable().optional(),
     currentShippingPriceSet: MoneySetSchema.nullable().optional(),
     currentTotalTaxSet: MoneySetSchema.nullable().optional(),
     currentTotalDiscountsSet: MoneySetSchema.nullable().optional(),

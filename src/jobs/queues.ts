@@ -10,6 +10,8 @@ const QUEUE_NAME = "shopify-sync";
 
 export interface SyncOrdersIncomeV1JobData {
   /** Single-store: no shop id; processor reads shop_config. */
+  /** When set, full sync uses this many days for backfill (watermark is reset by API before enqueue). */
+  fullSyncDays?: number;
 }
 
 let queue: Queue<SyncOrdersIncomeV1JobData> | null = null;

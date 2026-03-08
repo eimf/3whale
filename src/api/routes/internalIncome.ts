@@ -109,6 +109,8 @@ export async function registerInternalIncomeRoutes(fastify: FastifyInstance) {
                 discountAmount: result.summary.discountAmount,
                 ordersIncluded: result.summary.ordersIncluded,
                 ordersExcludedInRange: result.summary.ordersExcludedInRange,
+                incomeNetoProductOnly: result.summary.incomeNetoProductOnly,
+                ordersWithPositiveRevenue: result.summary.ordersWithPositiveRevenue,
             },
             orders: result.orders.map(orderToJson),
         });

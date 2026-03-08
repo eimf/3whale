@@ -50,11 +50,19 @@ export interface SyncOrdersIncomeV1Result {
     ordersExcluded: number;
 }
 
+export interface SyncOrdersIncomeV1Options {
+    /** When provided and watermark is null, use this many days for initial backfill (e.g. 90 for full sync). */
+    fullSyncDays?: number;
+}
+
 /**
  * Run sync for single store: watermark-based pagination, raw JSONB + normalized NUMERIC rows.
  * Idempotent: overlap days avoid duplicates (upsert by shopifyOrderId).
+ * @param options - Optional job data from queue (e.g. fullSyncDays for full reconciliation).
  */
-export async function syncOrdersIncomeV1(): Promise<SyncOrdersIncomeV1Result> {
+export async function syncOrdersIncomeV1(
+    options?: SyncOrdersIncomeV1Options,
+): Promise<SyncOrdersIncomeV1Result> {
     const [config] = await db
         .select()
         .from(shopConfig)
@@ -77,9 +85,11 @@ export async function syncOrdersIncomeV1(): Promise<SyncOrdersIncomeV1Result> {
 
     const now = new Date();
     const watermark = state?.watermarkProcessedAt ?? null;
+    const backfillDays =
+        options?.fullSyncDays ?? INITIAL_BACKFILL_DAYS;
     const effectiveWatermark = watermark
         ? new Date(watermark.getTime() - OVERLAP_DAYS * 24 * 60 * 60 * 1000)
-        : new Date(now.getTime() - INITIAL_BACKFILL_DAYS * 24 * 60 * 60 * 1000);
+        : new Date(now.getTime() - backfillDays * 24 * 60 * 60 * 1000);
     const searchQueryProcessed = `processed_at:>=${effectiveWatermark.toISOString()}`;
     const searchQueryUpdated = `updated_at:>=${effectiveWatermark.toISOString()}`;
     const accessToken = getAccessToken();
@@ -205,6 +215,38 @@ export async function syncOrdersIncomeV1(): Promise<SyncOrdersIncomeV1Result> {
                         throw err;
                     }
 
+                    const orderWithExtras = orderNode as {
+                        customer?: { id?: string; numberOfOrders?: number };
+                        lineItems?: {
+                            edges?: Array<{ node?: { quantity?: number } }>;
+                        };
+                        totalShippingPriceSet?: {
+                            shopMoney?: { amount?: string };
+                        };
+                        totalTaxSet?: { shopMoney?: { amount?: string } };
+                    };
+                    const customerId = orderWithExtras.customer?.id ?? null;
+                    const numberOfOrders =
+                        orderWithExtras.customer?.numberOfOrders;
+                    const isNewCustomer =
+                        numberOfOrders !== undefined &&
+                        numberOfOrders !== null
+                            ? numberOfOrders === 1
+                            : false;
+                    const lineItemsEdges =
+                        orderWithExtras.lineItems?.edges ?? [];
+                    const unitsSold = lineItemsEdges.reduce(
+                        (sum, edge) =>
+                            sum + (Number(edge.node?.quantity) || 0),
+                        0,
+                    );
+                    const shippingTotalStr =
+                        orderWithExtras.totalShippingPriceSet?.shopMoney
+                            ?.amount ?? normalized.order.shippingAmount.amount;
+                    const taxTotalStr =
+                        orderWithExtras.totalTaxSet?.shopMoney?.amount ??
+                        normalized.order.taxAmount.amount;
+
                     const components = computeIncomeComponents(
                         normalized.order,
                         normalized.refunds,
@@ -213,6 +255,10 @@ export async function syncOrdersIncomeV1(): Promise<SyncOrdersIncomeV1Result> {
                         normalized.order,
                         normalized.refunds,
                     );
+
+                    // Order Revenue = Gross Sales - Discounts + Shipping - Refunds (per Shopify Orders API).
+                    // income_neto is exactly that: (subtotal after discounts + shipping) - refunds.
+                    const orderRevenueStr = components.income_neto.amount;
 
                     if (components.currencyCode !== config.currencyCode) {
                         throw new Error(
@@ -364,6 +410,7 @@ export async function syncOrdersIncomeV1(): Promise<SyncOrdersIncomeV1Result> {
                             shopifyOrderId: normalized.order.id,
                             currencyCode: config.currencyCode,
                             processedAt,
+                            customerId,
                             lineItemsSubtotal:
                                 components.line_items_subtotal.amount,
                             shippingAmount: components.shipping_amount.amount,
@@ -374,12 +421,18 @@ export async function syncOrdersIncomeV1(): Promise<SyncOrdersIncomeV1Result> {
                             incomeNeto: components.income_neto.amount,
                             excluded,
                             excludedReason: exclusion.reason ?? null,
+                            isNewCustomer,
+                            unitsSold,
+                            shippingTotal: shippingTotalStr,
+                            taxTotal: taxTotalStr,
+                            orderRevenue: orderRevenueStr,
                         })
                         .onConflictDoUpdate({
                             target: orderIncomeV1.shopifyOrderId,
                             set: {
                                 currencyCode: config.currencyCode,
                                 processedAt,
+                                customerId,
                                 lineItemsSubtotal:
                                     components.line_items_subtotal.amount,
                                 shippingAmount:
@@ -392,6 +445,11 @@ export async function syncOrdersIncomeV1(): Promise<SyncOrdersIncomeV1Result> {
                                 incomeNeto: components.income_neto.amount,
                                 excluded,
                                 excludedReason: exclusion.reason ?? null,
+                                isNewCustomer,
+                                unitsSold,
+                                shippingTotal: shippingTotalStr,
+                                taxTotal: taxTotalStr,
+                                orderRevenue: orderRevenueStr,
                                 computedAt: new Date(),
                             },
                         });

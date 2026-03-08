@@ -13,32 +13,9 @@ import {
 } from "@/components/ui/dialog";
 import { MetricBarsChart, type BarSeriesPoint } from "./MetricBarsChart";
 import { MetricComparisonChart } from "./MetricComparisonChart";
+import type { DashboardMetricKey } from "@/types/metrics";
 
-export type DashboardMetricKey =
-  | "orderRevenue"
-  | "returns"
-  | "cogs"
-  | "adSpend"
-  | "shippingCost"
-  | "totalOrders"
-  | "grossProfit"
-  | "netProfit"
-  | "profitMargin"
-  | "blendedRoas"
-  | "aov"
-  | "cac"
-  | "taxes"
-  | "grossSales"
-  | "discounts"
-  | "trueAov"
-  | "averageOrderValue"
-  | "newCustomers"
-  | "returningCustomers"
-  | "ordersOverZero"
-  | "newCustomerOrders"
-  | "unitsSold"
-  | "newCustomerRevenue"
-  | "returningCustomerRevenue";
+export type { DashboardMetricKey };
 
 /** Display-only summary for latest/previous period (e.g. "Feb 23" / "Feb 22"); values from backend .display only. */
 export type SummaryItem = { label: string; displayValue: string };
@@ -66,6 +43,10 @@ export interface MetricDrilldownDialogProps {
   comparisonRange?: { from: string; to: string };
   currentTotal?: string;
   comparisonTotal?: string;
+  currencyCode?: string;
+  locale?: string;
+  /** Optional breakdown tab: list of { i18n label key, display value }. Shown when length > 0 (e.g. True AOV formula). */
+  breakdownRows?: Array<{ labelKey: string; value: string }>;
 }
 
 /**
@@ -76,7 +57,7 @@ export interface MetricDrilldownDialogProps {
 export function MetricDrilldownDialog({
   open,
   onOpenChange,
-  metricKey: _metricKey,
+  metricKey,
   title,
   barsSeries,
   summaryItems,
@@ -87,11 +68,14 @@ export function MetricDrilldownDialog({
   comparisonRange,
   currentTotal,
   comparisonTotal,
+  currencyCode = "MXN",
+  locale = "en",
+  breakdownRows,
 }: MetricDrilldownDialogProps) {
   const t = useTranslations("drilldown");
   const hasBars = Array.isArray(barsSeries) && barsSeries.length > 0;
-  const hasSummary = Array.isArray(summaryItems) && summaryItems.length > 0;
   const hasComparison = isComparing && Array.isArray(comparisonSeries) && comparisonSeries.length > 0 && hasBars;
+  const hasBreakdown = Array.isArray(breakdownRows) && breakdownRows.length > 0;
   const currentRangeLabel = currentRange ? formatRangeLabel(currentRange.from, currentRange.to) : null;
   const comparisonRangeLabel = isComparing && comparisonRange ? formatRangeLabel(comparisonRange.from, comparisonRange.to) : null;
 
@@ -152,21 +136,49 @@ export function MetricDrilldownDialog({
               >
                 {t("tabs.comparison")}
               </Tabs.Trigger>
+              {hasBreakdown && (
+                <Tabs.Trigger
+                  value="breakdown"
+                  className="rounded-md px-4 py-2 text-sm font-medium text-zinc-400 transition-colors data-[state=active]:bg-emerald-600 data-[state=active]:text-white data-[state=active]:shadow-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-zinc-900"
+                >
+                  {t("tabs.breakdown")}
+                </Tabs.Trigger>
+              )}
             </Tabs.List>
 
             <Tabs.Content value="bars" className="mt-4 focus:outline-none">
-              {hasSummary && summaryItems && (
-                <div className="flex flex-wrap gap-4 rounded-lg border border-zinc-700/60 bg-zinc-800/50 p-4">
-                  {summaryItems.map((item) => (
-                    <div key={item.label} className="flex flex-col gap-0.5">
-                      <span className="text-xs font-medium uppercase tracking-wider text-zinc-500">{item.label}</span>
-                      <span className="text-lg font-semibold text-zinc-100">{item.displayValue}</span>
+              {/* Current vs previous period header above the graph */}
+              {(currentRangeLabel != null || (isComparing && comparisonRangeLabel != null)) && (
+                <div className="flex flex-nowrap items-stretch justify-between gap-4 rounded-lg bg-zinc-900 p-4 mb-4 border border-zinc-700/60">
+                  <div className="flex flex-col gap-0.5 min-w-0">
+                    <span className="text-xs font-medium uppercase tracking-wider text-zinc-500">
+                      {currentRangeLabel ?? "—"}
+                    </span>
+                    <span className="text-lg font-semibold text-zinc-50">
+                      {currentTotal ?? "—"}
+                    </span>
+                  </div>
+                  {isComparing && comparisonRangeLabel != null && (
+                    <div className="flex flex-col gap-0.5 text-right shrink-0">
+                      <span className="text-xs font-medium uppercase tracking-wider text-zinc-500">
+                        {comparisonRangeLabel}
+                      </span>
+                      <span className="text-lg font-semibold text-zinc-400">
+                        {comparisonTotal ?? "—"}
+                      </span>
                     </div>
-                  ))}
+                  )}
                 </div>
               )}
               {hasBars ? (
-                <MetricBarsChart series={barsSeries!} label={title} />
+                <MetricBarsChart
+                  series={barsSeries!}
+                  label={title}
+                  metricKey={metricKey}
+                  granularity={granularity}
+                  currencyCode={currencyCode}
+                  locale={locale}
+                />
               ) : (
                 <div className="flex min-h-[240px] items-center justify-center rounded border border-zinc-700/50 bg-zinc-800/50 p-6">
                   <p className="text-sm text-zinc-500">{t("noData")}</p>
@@ -197,11 +209,19 @@ export function MetricDrilldownDialog({
                   comparisonSeries={comparisonSeries}
                   currentLabel={currentRangeLabel ?? "Current"}
                   comparisonLabel={comparisonRangeLabel ?? "Previous"}
+                  metricKey={metricKey}
+                  granularity={granularity}
+                  currencyCode={currencyCode}
+                  locale={locale}
                 />
               ) : hasBars && barsSeries ? (
                 <MetricComparisonChart
                   currentSeries={barsSeries}
                   currentLabel={currentRangeLabel ?? "Current"}
+                  metricKey={metricKey}
+                  granularity={granularity}
+                  currencyCode={currencyCode}
+                  locale={locale}
                 />
               ) : (
                 <div className="flex min-h-[240px] items-center justify-center rounded border border-zinc-700/50 bg-zinc-800/50 p-6">
@@ -209,6 +229,26 @@ export function MetricDrilldownDialog({
                 </div>
               )}
             </Tabs.Content>
+
+            {hasBreakdown && (
+              <Tabs.Content value="breakdown" className="mt-4 focus:outline-none">
+                <div className="space-y-3 rounded-lg border border-zinc-700/60 bg-zinc-800/50 p-4">
+                  {breakdownRows!.map((row, i) => (
+                    <div
+                      key={i}
+                      className="flex flex-wrap items-center justify-between gap-2"
+                    >
+                      <span className="text-sm text-zinc-400">
+                        {t(row.labelKey as `breakdown.${string}`)}
+                      </span>
+                      <span className="text-base font-medium text-zinc-100">
+                        {row.value}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </Tabs.Content>
+            )}
           </Tabs.Root>
         </DialogContent>
       </DialogPortal>

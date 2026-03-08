@@ -17,7 +17,7 @@ import {
   type RangePreset as RangePresetType,
 } from "@/store/dashboardSlice";
 import type { RootState } from "@/store/store";
-import { getTodayInTz } from "@/lib/dateRangeParams";
+import { getTodayInTz, getPresetRangeInTz } from "@/lib/dateRangeParams";
 
 const PRESETS: RangePresetType[] = [
   "today",
@@ -71,6 +71,25 @@ function CheckIcon() {
   );
 }
 
+function ChevronDownIcon() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="m6 9 6 6 6-6" />
+    </svg>
+  );
+}
+
 /** Format YYYY-MM-DD to "Mon DD" or "Mon DD - Mon DD" for range. */
 function formatRangeLabel(from: string, to: string): string {
   const a = new Date(from + "T12:00:00");
@@ -119,6 +138,7 @@ export function RangeSelectorPopover({
   const rangeCustom = useSelector((s: RootState) => s.dashboard.rangeCustom);
 
   const [open, setOpen] = useState(false);
+  const [presetListOpen, setPresetListOpen] = useState(false);
   const [pendingPreset, setPendingPreset] = useState<RangePresetType | null>(rangePreset);
   const [pendingFrom, setPendingFrom] = useState<string>(rangeCustom?.from ?? getTodayInTz(timezoneIana));
   const [pendingTo, setPendingTo] = useState<string>(rangeCustom?.to ?? getTodayInTz(timezoneIana));
@@ -145,8 +165,19 @@ export function RangeSelectorPopover({
       setPendingPreset(rangePreset);
       setPendingFrom(rangeCustom?.from ?? getTodayInTz(timezoneIana));
       setPendingTo(rangeCustom?.to ?? getTodayInTz(timezoneIana));
+    } else {
+      setPresetListOpen(false);
     }
   }, [open, rangePreset, rangeCustom?.from, rangeCustom?.to, timezoneIana]);
+
+  // When preset is selected, show the month that contains the selection (e.g. Yesterday → that month).
+  useEffect(() => {
+    if (open && pendingPreset) {
+      const { from } = getPresetRangeInTz(pendingPreset, timezoneIana);
+      const [y, m] = from.split("-").map(Number);
+      setFocusMonth({ year: y, month: m - 1 });
+    }
+  }, [open, pendingPreset, timezoneIana]);
 
   useEffect(() => {
     if (!open) return;
@@ -172,32 +203,36 @@ export function RangeSelectorPopover({
   }, [open]);
 
   const handlePresetClick = (preset: RangePresetType) => {
-    setPendingPreset(preset);
-    setPendingFrom("");
-    setPendingTo("");
+    dispatch(setRangePreset(preset));
+    setPresetListOpen(false);
+    setOpen(false);
   };
 
   const handleDayClick = (date: string) => {
     if (!date) return;
     setPendingPreset(null);
-    if (!pendingFrom || (pendingFrom && pendingTo)) {
+    if (pendingFrom == null || (pendingFrom !== null && pendingTo !== null)) {
       setPendingFrom(date);
-      setPendingTo(date);
+      setPendingTo(null);
     } else {
-      if (date < pendingFrom) {
-        setPendingTo(pendingFrom);
-        setPendingFrom(date);
+      const from = pendingFrom!;
+      const to = date;
+      if (to < from) {
+        setPendingFrom(to);
+        setPendingTo(from);
+      } else if (to === from) {
+        setPendingTo(to);
       } else {
-        setPendingTo(date);
+        setPendingTo(to);
       }
     }
   };
 
   const handleApply = () => {
-    if (pendingPreset) {
-      dispatch(setRangePreset(pendingPreset));
-    } else if (pendingFrom && pendingTo) {
-      dispatch(setRangeCustom({ from: pendingFrom, to: pendingTo }));
+    if (pendingPreset !== null) return;
+    if (pendingFrom) {
+      const to = pendingTo ?? pendingFrom;
+      dispatch(setRangeCustom({ from: pendingFrom, to }));
     }
     setOpen(false);
   };
@@ -209,19 +244,22 @@ export function RangeSelectorPopover({
     setOpen(false);
   };
 
-  const displayFrom = pendingPreset ? "" : pendingFrom;
-  const displayTo = pendingPreset ? "" : pendingTo;
+  const displayFrom = pendingPreset
+    ? getPresetRangeInTz(pendingPreset, timezoneIana).from
+    : pendingFrom ?? "";
+  const displayTo = pendingPreset
+    ? getPresetRangeInTz(pendingPreset, timezoneIana).to
+    : pendingTo ?? pendingFrom ?? "";
 
-  const leftMonth = getMonthDays(focusMonth.year, focusMonth.month);
-  const nextMonth = focusMonth.month === 11
-    ? getMonthDays(focusMonth.year + 1, 0)
-    : getMonthDays(focusMonth.year, focusMonth.month + 1);
+  /** Label for the mobile dropdown: preset name or "Custom range". */
+  const mobileDropdownLabel = pendingPreset
+    ? t(`presets.${pendingPreset}`)
+    : displayFrom && displayTo
+      ? formatRangeLabel(displayFrom, displayTo)
+      : t("presets.last7");
 
+  const monthDays = getMonthDays(focusMonth.year, focusMonth.month);
   const monthLabel = new Date(focusMonth.year, focusMonth.month).toLocaleString(undefined, {
-    month: "long",
-    year: "numeric",
-  });
-  const nextMonthLabel = new Date(focusMonth.year, focusMonth.month + 1).toLocaleString(undefined, {
     month: "long",
     year: "numeric",
   });
@@ -263,19 +301,52 @@ export function RangeSelectorPopover({
               refs.setFloating(el);
             }}
             style={floatingStyles}
-            className="z-50 w-[520px] rounded-xl border border-zinc-600 bg-zinc-900 shadow-xl"
+            className="z-50 w-[calc(100vw-24px)] max-w-[420px] md:max-w-none md:w-[500px] rounded-xl border border-zinc-600 bg-zinc-900 shadow-xl"
             role="dialog"
             aria-label={t("label")}
           >
-            <div className="flex">
-            {/* Presets sidebar */}
-            <div className="w-44 shrink-0 border-r border-zinc-700 p-2">
+            {/* Mobile: preset dropdown at top */}
+            <div className="md:hidden border-b border-zinc-700 px-4 pt-4 pb-3">
+              <button
+                type="button"
+                onClick={() => setPresetListOpen((o) => !o)}
+                className="flex w-full items-center justify-between rounded-lg border border-zinc-600 bg-zinc-800 px-4 py-3 text-left text-base text-zinc-200"
+                aria-expanded={presetListOpen}
+                aria-haspopup="listbox"
+              >
+                <span>{mobileDropdownLabel}</span>
+                <ChevronDownIcon />
+              </button>
+              {presetListOpen && (
+                <div className="mt-2 max-h-56 overflow-auto rounded-lg border border-zinc-600 bg-zinc-800 py-1">
+                  {PRESETS.map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => handlePresetClick(preset)}
+                      className={`flex w-full items-center justify-between px-4 py-3 text-left text-base ${
+                        pendingPreset === preset
+                          ? "bg-emerald-600/80 text-white"
+                          : "text-zinc-300 hover:bg-zinc-700"
+                      }`}
+                    >
+                      {t(`presets.${preset}`)}
+                      {pendingPreset === preset && <CheckIcon />}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="flex min-w-0">
+            {/* Presets sidebar — desktop only */}
+            <div className="hidden w-52 shrink-0 border-r border-zinc-700 py-3 pl-3 pr-2 md:block">
               {PRESETS.map((preset) => (
                 <button
                   key={preset}
                   type="button"
                   onClick={() => handlePresetClick(preset)}
-                  className={`flex w-full items-center justify-between rounded-md px-3 py-2 text-left text-sm ${
+                  className={`flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-left text-sm ${
                     pendingPreset === preset
                       ? "bg-emerald-600/80 text-white"
                       : "text-zinc-300 hover:bg-zinc-800"
@@ -287,101 +358,75 @@ export function RangeSelectorPopover({
               ))}
             </div>
 
-            {/* Dual calendar */}
-            <div className="flex-1 p-4">
-              <div className="flex gap-6">
-                <div className="flex-1">
-                  <div className="flex items-center justify-between text-sm font-medium text-zinc-300">
-                    <span>{monthLabel}</span>
-                    <div className="flex gap-1">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setFocusMonth((m) =>
-                            m.month === 0
-                              ? { year: m.year - 1, month: 11 }
-                              : { year: m.year, month: m.month - 1 }
-                          )
-                        }
-                        className="rounded p-1 hover:bg-zinc-700"
-                        aria-label="Previous month"
-                      >
-                        ‹
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setFocusMonth((m) =>
-                            m.month === 11
-                              ? { year: m.year + 1, month: 0 }
-                              : { year: m.year, month: m.month + 1 }
-                          )
-                        }
-                        className="rounded p-1 hover:bg-zinc-700"
-                        aria-label="Next month"
-                      >
-                        ›
-                      </button>
-                    </div>
-                  </div>
-                  <div className="mt-2 grid grid-cols-7 gap-0.5 text-center text-xs text-zinc-500">
-                    {["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((d) => (
-                      <div key={d}>{d}</div>
-                    ))}
-                  </div>
-                  <div className="mt-1 grid grid-cols-7 gap-0.5">
-                    {leftMonth.map((cell, i) => (
-                      <button
-                        key={i}
-                        type="button"
-                        onClick={() => cell.date && handleDayClick(cell.date)}
-                        disabled={!cell.date}
-                        className={`h-8 rounded text-sm ${
-                          !cell.date
-                            ? "invisible"
-                            : cell.date >= displayFrom && cell.date <= displayTo
-                              ? "bg-emerald-600 text-white"
-                              : "text-zinc-300 hover:bg-zinc-700"
-                        } ${cell.date === displayFrom || cell.date === displayTo ? "ring-1 ring-emerald-400" : ""}`}
-                      >
-                        {cell.date ? new Date(cell.date + "T12:00:00").getDate() : ""}
-                      </button>
-                    ))}
-                  </div>
+            {/* Single calendar */}
+            <div className="flex-1 p-4 md:p-5 md:pl-4">
+              <div className="flex items-center justify-between text-sm font-medium text-zinc-300">
+                <span>{monthLabel}</span>
+                <div className="flex gap-1">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setFocusMonth((m) =>
+                        m.month === 0
+                          ? { year: m.year - 1, month: 11 }
+                          : { year: m.year, month: m.month - 1 }
+                      )
+                    }
+                    className="rounded p-2 md:p-1.5 hover:bg-zinc-700 touch-manipulation"
+                    aria-label="Previous month"
+                  >
+                    ‹
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setFocusMonth((m) =>
+                        m.month === 11
+                          ? { year: m.year + 1, month: 0 }
+                          : { year: m.year, month: m.month + 1 }
+                      )
+                    }
+                    className="rounded p-2 md:p-1.5 hover:bg-zinc-700 touch-manipulation"
+                    aria-label="Next month"
+                  >
+                    ›
+                  </button>
                 </div>
-                <div className="flex-1">
-                  <div className="text-sm font-medium text-zinc-300">{nextMonthLabel}</div>
-                  <div className="mt-2 grid grid-cols-7 gap-0.5 text-center text-xs text-zinc-500">
-                    {["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((d) => (
-                      <div key={d}>{d}</div>
-                    ))}
-                  </div>
-                  <div className="mt-1 grid grid-cols-7 gap-0.5">
-                    {nextMonth.map((cell, i) => (
-                      <button
-                        key={i}
-                        type="button"
-                        onClick={() => cell.date && handleDayClick(cell.date)}
-                        disabled={!cell.date}
-                        className={`h-8 rounded text-sm ${
-                          !cell.date
-                            ? "invisible"
-                            : cell.date >= displayFrom && cell.date <= displayTo
-                              ? "bg-emerald-600 text-white"
-                              : "text-zinc-300 hover:bg-zinc-700"
-                        } ${cell.date === displayFrom || cell.date === displayTo ? "ring-1 ring-emerald-400" : ""}`}
-                      >
-                        {cell.date ? new Date(cell.date + "T12:00:00").getDate() : ""}
-                      </button>
-                    ))}
-                  </div>
-                </div>
+              </div>
+              <div className="mt-3 grid grid-cols-7 gap-1 text-center text-xs text-zinc-500">
+                {["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((d) => (
+                  <div key={d} className="py-1.5 md:py-1">{d}</div>
+                ))}
+              </div>
+              <div className="mt-2 grid grid-cols-7 gap-2 md:mt-1 md:gap-1.5">
+                {monthDays.map((cell, i) => {
+                  const isInRange = cell.date && cell.date >= displayFrom && cell.date <= displayTo;
+                  const isRangeStartOrEnd = cell.date && (cell.date === displayFrom || cell.date === displayTo);
+                  const isSingleDay = displayFrom && displayFrom === displayTo;
+                  return (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => cell.date && handleDayClick(cell.date)}
+                      disabled={!cell.date}
+                      className={`h-11 w-11 md:h-10 md:w-10 text-sm touch-manipulation ${
+                        !cell.date
+                          ? "invisible"
+                          : isInRange
+                            ? "bg-emerald-600 text-white"
+                            : "text-zinc-300 hover:bg-zinc-700"
+                      } ${isSingleDay && isRangeStartOrEnd ? "rounded-full" : "rounded-lg"} ${isRangeStartOrEnd ? "ring-2 ring-emerald-400 ring-offset-2 ring-offset-zinc-900" : ""}`}
+                    >
+                      {cell.date ? new Date(cell.date + "T12:00:00").getDate() : ""}
+                    </button>
+                  );
+                })}
               </div>
             </div>
           </div>
 
-          {/* Footer: timezone + Apply/Cancel */}
-          <div className="flex items-center justify-between border-t border-zinc-700 px-4 py-3">
+          {/* Footer: timezone + Apply/Cancel — Apply only for custom range */}
+          <div className="flex items-center justify-between border-t border-zinc-700 px-4 py-3.5 md:px-5">
             <span className="text-xs text-zinc-500">
               {t("timezone")}: {timezoneIana.replace(/_/g, " ")}
             </span>
@@ -393,13 +438,16 @@ export function RangeSelectorPopover({
               >
                 {t("cancel")}
               </button>
-              <button
-                type="button"
-                onClick={handleApply}
-                className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-500"
-              >
-                {t("apply")}
-              </button>
+              {pendingPreset === null && (
+                <button
+                  type="button"
+                  onClick={handleApply}
+                  disabled={!pendingFrom}
+                  className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {t("apply")}
+                </button>
+              )}
             </div>
           </div>
         </div>,

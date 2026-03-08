@@ -1,0 +1,186 @@
+{
+    "nav": {
+        "summary": "Summary"
+    },
+    "dashboard": {
+        "title": "Dashboard",
+        "range": {
+            "label": "Range",
+            "days": "Last {days} days",
+            "dropdown": "Last {days} days",
+            "presets": {
+                "today": "Today",
+                "yesterday": "Yesterday",
+                "last7": "Last 7 days",
+                "last14": "Last 14 days",
+                "last30": "Last 30 days",
+                "last90": "Last 90 days",
+                "last365": "Last 365 days",
+                "lastMonth": "Last month"
+            },
+            "previousPeriod": "Previous period",
+            "noComparison": "No comparison",
+            "timezone": "Timezone",
+            "apply": "Apply",
+            "cancel": "Cancel"
+        },
+        "incomeOverview": "Gross income, refunds and net",
+        "tienda": "Store"
+    },
+    "metrics": {
+        "incomeBruto": "Gross income",
+        "refunds": "Refunds",
+        "incomeNeto": "Net income",
+        "revenue": "Order Revenue",
+        "returns": "Returns",
+        "cogs": "COGS (Product)",
+        "adSpend": "Ad Spend",
+        "shippingCost": "Shipping Cost",
+        "totalOrders": "Total Orders",
+        "grossProfit": "Gross Profit",
+        "netProfit": "Net Profit",
+        "profitMargin": "Profit Margin",
+        "blendedRoas": "Blended ROAS",
+        "aov": "AOV",
+        "cac": "CAC",
+        "revenueVsAdSpend": "Revenue vs Ad Spend",
+        "blendedRoasChart": "Blended ROAS",
+        "ordersPerDay": "Orders per Day",
+        "netProfitChart": "Net Profit",
+        "orderRevenue": "Order Revenue",
+        "taxes": "Taxes",
+        "trueAov": "True AOV",
+        "averageOrderValue": "Average order value",
+        "newCustomers": "New customers",
+        "grossSales": "Gross sales",
+        "returningCustomers": "Returning customers",
+        "ordersOverZero": "Orders > $0",
+        "newCustomerOrders": "New customer orders",
+        "unitsSold": "Units sold",
+        "newCustomerRevenue": "New customer revenue",
+        "returningCustomerRevenue": "Returning customer revenue",
+        "discounts": "Discounts",
+        "ingresos": "Order Revenue",
+        "ordenes": "Orders",
+        "reembolsos": "Refunds",
+        "impuestosVentas": "Sales taxes",
+        "tooltips": {
+            "ingresos": {
+                "description": "Order revenue aligned to Shopify (net per bucket, after refunds).",
+                "formula": "Order Revenue (app) = Net income per bucket"
+            },
+            "ordenes": {
+                "description": "Total number of orders in the selected range."
+            },
+            "reembolsos": {
+                "description": "Amount refunded in the selected period. Calculated by refund date.",
+                "note": "May differ from Shopify if you use third-party return apps."
+            },
+            "impuestosVentas": {
+                "description": "Taxes paid by customer − taxes refunded."
+            },
+            "trueAov": {
+                "description": "Average of non-zero order values (before shipping or taxes).",
+                "formula": "True AOV = Order Revenue / Number of orders > $0"
+            },
+            "averageOrderValue": {
+                "description": "Average order value (before shipping or taxes).",
+                "formula": "AOV = Order Revenue / Number of orders"
+            },
+            "newCustomers": {
+                "description": "Percentage of purchases made by new customers.",
+                "formula": "New Customers % = New customer orders / Total orders"
+            },
+            "grossSales": {
+                "description": "Gross sales (before shipping, taxes, discounts or refunds).",
+                "formula": "Gross Sales = Product Price × Units Sold"
+            },
+            "returningCustomers": {
+                "description": "Percentage of orders from returning customers.",
+                "formula": "Returning Customers % = Returning customer orders / Total orders"
+            },
+            "ordersOverZero": {
+                "description": "Total orders with revenue greater than zero.",
+                "formula": "Non-Zero Orders = Count of orders where Order Revenue > $0"
+            },
+            "newCustomerOrders": {
+                "description": "Total orders from new customers in the selected range."
+            },
+            "unitsSold": {
+                "description": "Total units sold (sum of line item quantities)."
+            },
+            "newCustomerRevenue": {
+                "description": "Total revenue from new customer orders."
+            },
+            "returningCustomerRevenue": {
+                "description": "Total revenue from returning customer orders."
+            },
+            "discounts": {
+                "description": "Total discounts applied to the order, including shipping discounts."
+            },
+            "totalSales": {
+                "description": "Net total sales after shipping, taxes, discounts and refunds. Revenue by order date; refunds by refund date.",
+                "formula": "Total Sales = Gross Sales + Shipping + Taxes − Discounts − Refunded Sales − Refunded Shipping − Refunded Taxes"
+            },
+            "salesTaxes": {
+                "description": "Total taxes paid by customers, before refunds."
+            },
+            "netProfit": {
+                "description": "Net profit after costs and refunds."
+            },
+            "cogs": { "description": "Cost of goods sold." },
+            "adSpend": { "description": "Advertising spend." },
+            "shippingCost": { "description": "Shipping cost." },
+            "grossProfit": { "description": "Gross profit." },
+            "profitMargin": { "description": "Profit margin." },
+            "blendedRoas": { "description": "Blended ROAS." },
+            "aov": { "description": "Average order value." },
+            "cac": { "description": "Customer acquisition cost." }
+        }
+    },
+    "drilldown": {
+        "selectDay": "Select a day…",
+        "ordersForDay": "Orders for {date}",
+        "tabs": { "bars": "Bars", "comparison": "Comparison", "breakdown": "Breakdown" },
+        "noData": "No data yet",
+        "breakdown": {
+            "netSalesOrdersValue": "Net sales orders value",
+            "ordersOverZero": "Orders > $0",
+            "trueAov": "True AOV"
+        }
+    },
+    "state": {
+        "loading": "Loading…",
+        "errorLoading": "Error loading data",
+        "noData": "No data"
+    },
+    "sync": {
+        "lastSynced": "Last synced",
+        "lastSyncedNever": "Never",
+        "syncNow": "Sync now",
+        "fullSync": "Full sync",
+        "fullSyncTitle": "Re-fetch last 90 days from Shopify to fix gaps (ensure worker is running)",
+        "syncing": "Syncing…",
+        "syncStarted": "Sync in progress. Refresh in a moment.",
+        "fullSyncStarted": "Full sync started. Worker will re-fetch last 90 days.",
+        "fullSyncModal": {
+            "title": "Full sync (reconcile with Shopify)",
+            "whatItDoes": "This will:",
+            "whatItDoesBullet1": "Clear the sync watermark so the next run ignores previous progress",
+            "whatItDoesBullet2": "Enqueue a job that re-fetches the last 90 days of orders from Shopify",
+            "whatItDoesBullet3": "Upsert every order in that window (fixes missing or outdated data from past failures)",
+            "whatToExpect": "What to expect:",
+            "whatToExpectBullet1": "The sync worker must be running (e.g. npm run dev:worker); otherwise the job will not run",
+            "whatToExpectBullet2": "The job may take several minutes depending on order volume",
+            "whatToExpectBullet3": "Dashboard numbers will update after the run finishes — refresh the page or wait for the next status poll",
+            "cancel": "Cancel",
+            "confirm": "Start full sync"
+        }
+    },
+    "tiendaHeader": {
+        "share": "Share or export",
+        "menu": "Menu",
+        "filters": "Filters or controls",
+        "grid": "Grid view"
+    }
+}

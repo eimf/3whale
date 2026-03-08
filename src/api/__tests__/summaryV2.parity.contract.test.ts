@@ -104,6 +104,8 @@ describe("GET /internal/income/summary-v2 parity invariants", () => {
                 ordersIncluded: 1,
                 ordersExcludedInRange: 0,
                 currencyCode: "MXN",
+                incomeNetoProductOnly: "100.000000",
+                ordersWithPositiveRevenue: 1,
             },
         });
 

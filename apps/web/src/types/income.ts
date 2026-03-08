@@ -31,6 +31,12 @@ export type DailyPointV2 = {
     shippingAmount: MoneyValue;
     taxAmount: MoneyValue;
     discountAmount: MoneyValue;
+    unitsSold?: number;
+    newCustomers?: number;
+    returningCustomers?: number;
+    newCustomerOrders?: number;
+    newCustomerRevenue?: MoneyValue;
+    returningCustomerRevenue?: MoneyValue;
 };
 
 export type SummaryV2 = {
@@ -39,6 +45,12 @@ export type SummaryV2 = {
     /** Order count for parity (includes cancelled; excludes only test/deleted). Use for "Orders #" in canonical 8-metric view. */
     ordersCountParity?: number;
     orderRevenue: MoneyValue;
+    unitsSold?: number;
+    newCustomers?: number;
+    returningCustomers?: number;
+    newCustomerOrders?: number;
+    newCustomerRevenue?: MoneyValue;
+    returningCustomerRevenue?: MoneyValue;
     incomeBruto: MoneyValue;
     refunds: MoneyValue;
     refundsReportedAmount: MoneyValue;
@@ -57,6 +69,10 @@ export type SummaryV2 = {
     discountAmount: MoneyValue;
     ordersIncluded: number;
     ordersExcludedInRange: number;
+    /** True AOV numerator: product revenue only (income_neto − shipping for orders with revenue > 0) */
+    incomeNetoProductOnly?: MoneyValue;
+    /** True AOV denominator: count of orders with income_neto > 0 */
+    ordersWithPositiveRevenue?: number;
     aovNeto: MoneyValue;
     shopifyParityModel?: ShopifyParityModel;
     shopifyParity?: ShopifyParityMetrics;
@@ -67,6 +83,12 @@ export type SummaryV2 = {
 
 export type SummaryV2Comparison = {
     orderRevenue: MoneyValue;
+    unitsSold?: number;
+    newCustomers?: number;
+    returningCustomers?: number;
+    newCustomerOrders?: number;
+    newCustomerRevenue?: MoneyValue;
+    returningCustomerRevenue?: MoneyValue;
     incomeBruto: MoneyValue;
     refunds: MoneyValue;
     refundsReportedAmount: MoneyValue;
@@ -85,6 +107,8 @@ export type SummaryV2Comparison = {
     discountAmount: MoneyValue;
     ordersIncluded: number;
     aovNeto: MoneyValue;
+    incomeNetoProductOnly?: MoneyValue;
+    ordersWithPositiveRevenue?: number;
     shopifyParity?: ShopifyParityMetrics;
 };
 
@@ -95,6 +119,12 @@ export type DeltaItem = {
 
 export type SummaryV2Deltas = {
     orderRevenue: DeltaItem;
+    unitsSold?: DeltaItem;
+    newCustomers?: DeltaItem;
+    returningCustomers?: DeltaItem;
+    newCustomerOrders?: DeltaItem;
+    newCustomerRevenue?: DeltaItem;
+    returningCustomerRevenue?: DeltaItem;
     incomeBruto: DeltaItem;
     refunds: DeltaItem;
     refundsReportedAmount: DeltaItem;

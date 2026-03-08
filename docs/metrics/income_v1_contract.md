@@ -33,8 +33,8 @@ El contrato canónico de la API de series (`/internal/income/daily-v2`) vive en:
 ## 2. Fórmulas exactas
 
 - **income_bruto** (por orden, en moneda tienda):
-    - `income_bruto = (subtotal_after_discounts + shipping_amount) − tax_amount`
-    - Equivalente: tomar total cobrado, restar impuestos. Subtotal ya va “después de descuentos”; envío incluido; impuestos excluidos.
+    - `income_bruto = subtotal_after_discounts + shipping_amount` (impuestos **no** se suman; se reportan aparte).
+    - Equivalente: subtotal ya va “después de descuentos”; envío incluido; impuestos excluidos del income por diseño.
 
 - **refunds** (por orden):
     - `refunds = suma de montos de refunds aplicados a la orden` (en moneda tienda).
@@ -95,7 +95,7 @@ El contrato canónico de la API de series (`/internal/income/daily-v2`) vive en:
 | ------------------------------------------------------------ | -------------------------------------------------------- |
 | Orden cancelada (`Order.canceledAt` presente)                | **No** incluir.                                          |
 | Orden test (`Order.test === true`)                           | **No** incluir.                                          |
-| Orden 100% reembolsada (refunds ≥ total cobrado de la orden) | **Excluir** la orden del income (no aporta income_neto). |
+| Orden 100% reembolsada (refunds ≥ income_bruto de la orden) | **Excluir** la orden del income (no aporta income_neto). |
 | Resto de órdenes con `processedAt` presente                  | Incluir; bucketing por `processedAt` según §4.           |
 
 ---
@@ -210,6 +210,31 @@ _Precisión: almacenamiento NUMERIC; display 2 decimales, half-up._
 - Chargebacks y disputas.
 - Ajustes contables y conciliación bancaria.
 - Posible bucket por fecha de pago/clearing además de processedAt.
+
+---
+
+## True AOV (estilo Triple Whale)
+
+La métrica **True AOV** expuesta en el dashboard como `trueAov` (clave interna `aovNeto`) se calcula en este código como:
+
+- **Numerador:** suma de `income_neto` de todas las órdenes **incluidas** en el rango de fechas (mismas reglas de §5).
+- **Denominador:** número de esas órdenes (`ordersIncluded`).
+- **Fórmula:** `aovNeto = (ordersIncluded > 0) ? (Σ income_neto / ordersIncluded) : 0`; resultado en 6 decimales.
+
+Origen de datos: tabla `order_income_v1`; agregado vía `listOrders()` → `summary`; endpoint `GET /internal/summary-v2`. La atribución temporal es por `processed_at` de la orden.
+
+**Fórmula oficial Triple Whale (documentación 2026):**  
+True AOV = (Order Revenue − Shipping − Taxes) / Orders with Revenue > 0  
+(es decir, solo **revenue de producto** en el numerador; shipping y tax excluidos; órdenes con revenue ≤ 0 excluidas del numerador y denominador; redondeo banker’s rounding).
+
+**Implementación en este repo (paridad Triple Whale):**  
+El dashboard `aovNeto` usa `incomeNetoProductOnly` (suma de income_neto − shipping por orden con income_neto > 0) como numerador y `ordersWithPositiveRevenue` como denominador, con redondeo half-even a 6 decimales. Gift cards no implementados.
+
+Para comparación punto por punto con la documentación oficial de Triple Whale y la lista de cambios (incl. gift cards), ver:
+
+`docs/metrics/TRUE_AOV_SPEC_RECONCILIATION.md`
+
+**Nota:** La paridad con Triple Whale está implementada para numerador (producto solo), denominador (solo órdenes con revenue > 0) y redondeo. Gift card sales/redemptions siguen sin lógica específica.
 
 ---
 

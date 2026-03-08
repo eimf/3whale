@@ -86,6 +86,10 @@ export interface ListOrdersResult {
         discountAmount: string;
         ordersIncluded: number;
         ordersExcludedInRange: number;
+        /** Triple Whale True AOV: sum(income_neto - shipping_amount) for orders with income_neto > 0 */
+        incomeNetoProductOnly: string;
+        /** Triple Whale True AOV: count of orders with income_neto > 0 */
+        ordersWithPositiveRevenue: number;
     };
 }
 
@@ -150,6 +154,8 @@ export async function listOrders(params: {
             shippingAmount: sql<string>`COALESCE(SUM(${orderIncomeV1.shippingAmount}), 0)::text`,
             taxAmount: sql<string>`COALESCE(SUM(${orderIncomeV1.taxAmount}), 0)::text`,
             discountAmount: sql<string>`COALESCE(SUM(${orderIncomeV1.discountAmount}), 0)::text`,
+            incomeNetoProductOnly: sql<string>`COALESCE(SUM(${orderIncomeV1.incomeNeto} - ${orderIncomeV1.shippingAmount}) FILTER (WHERE ${orderIncomeV1.incomeNeto} > 0), 0)::text`,
+            ordersWithPositiveRevenue: sql<number>`COUNT(*) FILTER (WHERE ${orderIncomeV1.incomeNeto} > 0)::int`,
         })
         .from(orderIncomeV1)
         .where(whereIncluded);
@@ -174,6 +180,10 @@ export async function listOrders(params: {
             discountAmount: s ? toMoneyString(s.discountAmount) : "0.000000",
             ordersIncluded: total,
             ordersExcludedInRange,
+            incomeNetoProductOnly: s
+                ? toMoneyString(s.incomeNetoProductOnly)
+                : "0.000000",
+            ordersWithPositiveRevenue: s?.ordersWithPositiveRevenue ?? 0,
         },
     };
 }

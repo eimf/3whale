@@ -120,6 +120,7 @@ export const orderIncomeV1 = pgTable(
         shopifyOrderId: text("shopify_order_id").primaryKey(),
         currencyCode: text("currency_code").notNull(),
         processedAt: timestamptz("processed_at").notNull(),
+        customerId: text("customer_id"),
         lineItemsSubtotal: numeric(
             "line_items_subtotal",
             numeric20_6,
@@ -132,6 +133,11 @@ export const orderIncomeV1 = pgTable(
         incomeNeto: numeric("income_neto", numeric20_6).notNull(),
         excluded: boolean("excluded").notNull().default(false),
         excludedReason: text("excluded_reason"),
+        isNewCustomer: boolean("is_new_customer"),
+        unitsSold: integer("units_sold").notNull().default(0),
+        shippingTotal: numeric("shipping_total", { precision: 10, scale: 2 }),
+        taxTotal: numeric("tax_total", { precision: 10, scale: 2 }),
+        orderRevenue: numeric("order_revenue", { precision: 10, scale: 2 }),
         computedAt: timestamptz("computed_at").notNull().defaultNow(),
     },
     (t) => [

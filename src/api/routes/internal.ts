@@ -21,7 +21,7 @@ import {
     getSyncQueue,
     JOB_NAME_SYNC_ORDERS_INCOME_V1,
 } from "../../jobs/queues.js";
-import { toMoneyValue } from "../../metrics/moneyValue.js";
+import { toMoneyValue, roundToDecimalsHalfEven } from "../../metrics/moneyValue.js";
 import {
     listOrders,
     getShopifyCanonicalParity,
@@ -137,12 +137,23 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
         return reply.send(config);
     });
 
-    /** Enqueue sync job (single-store). */
-    fastify.post("/internal/sync/run", async (_req, reply) => {
-        const queue = getSyncQueue();
-        const job = await queue.add(JOB_NAME_SYNC_ORDERS_INCOME_V1, {});
-        return reply.send({ jobId: job.id });
-    });
+    /** Enqueue sync job (single-store). Optional ?fullSync=true to reset watermark first for full backfill (90 days). */
+    fastify.post<{ Querystring: { fullSync?: string } }>(
+        "/internal/sync/run",
+        async (req, reply) => {
+            const fullSync =
+                req.query.fullSync === "true" || req.query.fullSync === "1";
+            if (fullSync) {
+                await db
+                    .update(syncState)
+                    .set({ watermarkProcessedAt: null })
+                    .where(eq(syncState.id, "singleton"));
+            }
+            const queue = getSyncQueue();
+            const job = await queue.add(JOB_NAME_SYNC_ORDERS_INCOME_V1, fullSync ? { fullSyncDays: 90 } : {});
+            return reply.send({ jobId: job.id, fullSync });
+        },
+    );
 
     /** Sync status: shop_config, sync_state, last 10 run logs, counts. */
     fastify.get("/internal/sync-status", async (_req, reply) => {
@@ -209,7 +220,7 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
                     error: "shop_config not found. Call POST /internal/bootstrap first.",
                 });
             }
-            const tz = config.timezoneIana;
+            const tz = config.timezoneIana ?? "America/Mexico_City";
             const end = DateTime.now().setZone(tz);
             const start = end.startOf("day").minus({ days: days - 1 });
             const startUtc = start.toUTC().toJSDate();
@@ -285,6 +296,14 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
                     .string()
                     .regex(/^\d{4}-\d{2}-\d{2}$/)
                     .optional(),
+                startDate: z
+                    .string()
+                    .regex(/^\d{4}-\d{2}-\d{2}$/)
+                    .optional(),
+                endDate: z
+                    .string()
+                    .regex(/^\d{4}-\d{2}-\d{2}$/)
+                    .optional(),
                 granularity: z.enum(["hour", "day"]).optional(),
                 includeExcluded: z
                     .string()
@@ -315,12 +334,15 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
                     error: "shop_config not found. Call POST /internal/bootstrap first.",
                 });
             }
-            const tz = config.timezoneIana;
+            const tz = config.timezoneIana ?? "America/Mexico_City";
 
             let startUtc: Date;
             let endUtc: Date;
             let from: string;
             let to: string;
+
+            const fromParam = q.startDate ?? q.from;
+            const toParam = q.endDate ?? q.to;
 
             if (q.days !== undefined) {
                 const end = DateTime.now().setZone(tz);
@@ -329,13 +351,17 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
                 endUtc = end.toUTC().toJSDate();
                 from = start.toISODate() ?? "";
                 to = end.toISODate() ?? "";
-            } else if (q.from !== undefined && q.to !== undefined) {
+            } else if (fromParam !== undefined && toParam !== undefined) {
                 try {
-                    const range = parseLocalDateRangeToUtc(q.from, q.to, tz);
+                    const range = parseLocalDateRangeToUtc(
+                        fromParam,
+                        toParam,
+                        tz,
+                    );
                     startUtc = range.startUtc;
                     endUtc = range.endUtc;
-                    from = q.from;
-                    to = q.to;
+                    from = fromParam;
+                    to = toParam;
                 } catch (e) {
                     return reply.code(400).send({
                         error:
@@ -346,7 +372,8 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
                 }
             } else {
                 return reply.code(400).send({
-                    error: "Provide either days or both from and to",
+                    error:
+                        "Provide either days or both startDate and endDate (or from and to) as YYYY-MM-DD",
                 });
             }
 
@@ -377,6 +404,12 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
                     shippingAmount: ReturnType<typeof toMoneyValue>;
                     taxAmount: ReturnType<typeof toMoneyValue>;
                     discountAmount: ReturnType<typeof toMoneyValue>;
+                    unitsSold: number;
+                    newCustomers: number;
+                    returningCustomers: number;
+                    newCustomerOrders: number;
+                    newCustomerRevenue: ReturnType<typeof toMoneyValue>;
+                    returningCustomerRevenue: ReturnType<typeof toMoneyValue>;
                 }>
             > {
                 const exclusionPredicate = includeExcluded
@@ -401,7 +434,14 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
                                 SUM(income_neto)::text AS income_neto,
                                 SUM(shipping_amount)::text AS shipping_amount,
                                 SUM(tax_amount)::text AS tax_amount,
-                                SUM(discount_amount)::text AS discount_amount
+                                SUM(discount_amount)::text AS discount_amount,
+                                COALESCE(SUM(order_revenue), 0)::text AS order_revenue_gross,
+                                COALESCE(SUM(units_sold), 0)::bigint AS units_sold,
+                                COUNT(DISTINCT customer_id) FILTER (WHERE is_new_customer = true)::int AS new_customers,
+                                COUNT(DISTINCT customer_id) FILTER (WHERE is_new_customer = false)::int AS returning_customers,
+                                COUNT(*) FILTER (WHERE is_new_customer = true)::int AS new_customer_orders,
+                                COALESCE(SUM(order_revenue) FILTER (WHERE is_new_customer = true), 0)::text AS new_customer_revenue,
+                                COALESCE(SUM(order_revenue) FILTER (WHERE is_new_customer = false), 0)::text AS returning_customer_revenue
                             FROM order_income_v1
                             WHERE ${exclusionPredicate}
                                 AND processed_at >= ${sUtc}
@@ -435,6 +475,7 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
                             to_char(b.bucket_local, 'YYYY-MM-DD"T"HH24:MI:SS') AS date,
                             COALESCE(a.orders_count, 0)::int AS orders_count,
                             COALESCE(a.line_items_subtotal, '0')::text AS line_items_subtotal,
+                            COALESCE(a.order_revenue_gross, '0')::text AS order_revenue_gross,
                             COALESCE(a.income_bruto, '0')::text AS income_bruto,
                             COALESCE(rf.refunds, '0')::text AS refunds,
                             COALESCE(rf.refund_reported_amount, '0')::text AS refund_reported_amount,
@@ -443,7 +484,13 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
                             COALESCE(a.income_neto, '0')::text AS income_neto,
                             COALESCE(a.shipping_amount, '0')::text AS shipping_amount,
                             COALESCE(a.tax_amount, '0')::text AS tax_amount,
-                            COALESCE(a.discount_amount, '0')::text AS discount_amount
+                            COALESCE(a.discount_amount, '0')::text AS discount_amount,
+                            COALESCE(a.units_sold, 0)::bigint AS units_sold,
+                            COALESCE(a.new_customers, 0)::int AS new_customers,
+                            COALESCE(a.returning_customers, 0)::int AS returning_customers,
+                            COALESCE(a.new_customer_orders, 0)::int AS new_customer_orders,
+                            COALESCE(a.new_customer_revenue, '0')::text AS new_customer_revenue,
+                            COALESCE(a.returning_customer_revenue, '0')::text AS returning_customer_revenue
                         FROM buckets b
                         LEFT JOIN agg a ON a.bucket_local = b.bucket_local
                         LEFT JOIN refunds_agg rf ON rf.bucket_local = b.bucket_local
@@ -457,7 +504,7 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
                             date: String(r.date ?? ""),
                             ordersCount: Number(r.orders_count ?? 0),
                             orderRevenue: toMoneyValue(
-                                String(r.line_items_subtotal ?? "0"),
+                                String(r.income_neto ?? "0"),
                             ),
                             incomeBruto: toMoneyValue(
                                 String(r.income_bruto ?? "0"),
@@ -484,6 +531,16 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
                             discountAmount: toMoneyValue(
                                 String(r.discount_amount ?? "0"),
                             ),
+                            unitsSold: Number(r.units_sold ?? 0),
+                            newCustomers: Number(r.new_customers ?? 0),
+                            returningCustomers: Number(r.returning_customers ?? 0),
+                            newCustomerOrders: Number(r.new_customer_orders ?? 0),
+                            newCustomerRevenue: toMoneyValue(
+                                String(r.new_customer_revenue ?? "0"),
+                            ),
+                            returningCustomerRevenue: toMoneyValue(
+                                String(r.returning_customer_revenue ?? "0"),
+                            ),
                         };
                     });
 
@@ -505,6 +562,12 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
                             shippingAmount: toMoneyValue("0"),
                             taxAmount: toMoneyValue("0"),
                             discountAmount: toMoneyValue("0"),
+                            unitsSold: 0,
+                            newCustomers: 0,
+                            returningCustomers: 0,
+                            newCustomerOrders: 0,
+                            newCustomerRevenue: toMoneyValue("0"),
+                            returningCustomerRevenue: toMoneyValue("0"),
                         }),
                     );
                 }
@@ -525,7 +588,14 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
                             SUM(income_neto)::text AS income_neto,
                             SUM(shipping_amount)::text AS shipping_amount,
                             SUM(tax_amount)::text AS tax_amount,
-                            SUM(discount_amount)::text AS discount_amount
+                            SUM(discount_amount)::text AS discount_amount,
+                            COALESCE(SUM(order_revenue), 0)::text AS order_revenue_gross,
+                            COALESCE(SUM(units_sold), 0)::bigint AS units_sold,
+                            COUNT(DISTINCT customer_id) FILTER (WHERE is_new_customer = true)::int AS new_customers,
+                            COUNT(DISTINCT customer_id) FILTER (WHERE is_new_customer = false)::int AS returning_customers,
+                            COUNT(*) FILTER (WHERE is_new_customer = true)::int AS new_customer_orders,
+                            COALESCE(SUM(order_revenue) FILTER (WHERE is_new_customer = true), 0)::text AS new_customer_revenue,
+                            COALESCE(SUM(order_revenue) FILTER (WHERE is_new_customer = false), 0)::text AS returning_customer_revenue
                         FROM order_income_v1
                         WHERE ${exclusionPredicate}
                             AND processed_at >= ${sUtc}
@@ -559,6 +629,7 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
                         to_char(b.bucket_local_day, 'YYYY-MM-DD') AS date,
                         COALESCE(a.orders_count, 0)::int AS orders_count,
                         COALESCE(a.line_items_subtotal, '0')::text AS line_items_subtotal,
+                        COALESCE(a.order_revenue_gross, '0')::text AS order_revenue_gross,
                         COALESCE(a.income_bruto, '0')::text AS income_bruto,
                         COALESCE(rf.refunds, '0')::text AS refunds,
                         COALESCE(rf.refund_reported_amount, '0')::text AS refund_reported_amount,
@@ -567,7 +638,13 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
                         COALESCE(a.income_neto, '0')::text AS income_neto,
                         COALESCE(a.shipping_amount, '0')::text AS shipping_amount,
                         COALESCE(a.tax_amount, '0')::text AS tax_amount,
-                        COALESCE(a.discount_amount, '0')::text AS discount_amount
+                        COALESCE(a.discount_amount, '0')::text AS discount_amount,
+                        COALESCE(a.units_sold, 0)::bigint AS units_sold,
+                        COALESCE(a.new_customers, 0)::int AS new_customers,
+                        COALESCE(a.returning_customers, 0)::int AS returning_customers,
+                        COALESCE(a.new_customer_orders, 0)::int AS new_customer_orders,
+                        COALESCE(a.new_customer_revenue, '0')::text AS new_customer_revenue,
+                        COALESCE(a.returning_customer_revenue, '0')::text AS returning_customer_revenue
                     FROM buckets b
                     LEFT JOIN agg a ON a.bucket_local_day = b.bucket_local_day
                     LEFT JOIN refunds_agg rf ON rf.bucket_local_day = b.bucket_local_day
@@ -579,7 +656,7 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
                     date: String(r.date ?? ""),
                     ordersCount: Number(r.orders_count ?? 0),
                     orderRevenue: toMoneyValue(
-                        String(r.line_items_subtotal ?? "0"),
+                        String(r.income_neto ?? "0"),
                     ),
                     incomeBruto: toMoneyValue(String(r.income_bruto ?? "0")),
                     refunds: toMoneyValue(String(r.refunds ?? "0")),
@@ -599,6 +676,16 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
                     taxAmount: toMoneyValue(String(r.tax_amount ?? "0")),
                     discountAmount: toMoneyValue(
                         String(r.discount_amount ?? "0"),
+                    ),
+                    unitsSold: Number(r.units_sold ?? 0),
+                    newCustomers: Number(r.new_customers ?? 0),
+                    returningCustomers: Number(r.returning_customers ?? 0),
+                    newCustomerOrders: Number(r.new_customer_orders ?? 0),
+                    newCustomerRevenue: toMoneyValue(
+                        String(r.new_customer_revenue ?? "0"),
+                    ),
+                    returningCustomerRevenue: toMoneyValue(
+                        String(r.returning_customer_revenue ?? "0"),
                     ),
                 }));
             }
@@ -661,6 +748,14 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
                 .string()
                 .regex(/^\d{4}-\d{2}-\d{2}$/)
                 .optional(),
+            startDate: z
+                .string()
+                .regex(/^\d{4}-\d{2}-\d{2}$/)
+                .optional(),
+            endDate: z
+                .string()
+                .regex(/^\d{4}-\d{2}-\d{2}$/)
+                .optional(),
             includeExcluded: z
                 .string()
                 .optional()
@@ -696,12 +791,15 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
                     error: "shop_config not found. Call POST /internal/bootstrap first.",
                 });
             }
-            const tz = config.timezoneIana;
+            const tz = config.timezoneIana ?? "America/Mexico_City";
 
             let startUtc: Date;
             let endUtc: Date;
             let from: string;
             let to: string;
+
+            const fromParam = q.startDate ?? q.from;
+            const toParam = q.endDate ?? q.to;
 
             if (q.days !== undefined) {
                 const end = DateTime.now().setZone(tz);
@@ -710,13 +808,17 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
                 endUtc = end.toUTC().toJSDate();
                 from = start.toISODate() ?? "";
                 to = end.toISODate() ?? "";
-            } else if (q.from !== undefined && q.to !== undefined) {
+            } else if (fromParam !== undefined && toParam !== undefined) {
                 try {
-                    const range = parseLocalDateRangeToUtc(q.from, q.to, tz);
+                    const range = parseLocalDateRangeToUtc(
+                        fromParam,
+                        toParam,
+                        tz,
+                    );
                     startUtc = range.startUtc;
                     endUtc = range.endUtc;
-                    from = q.from;
-                    to = q.to;
+                    from = fromParam;
+                    to = toParam;
                 } catch (e) {
                     return reply.code(400).send({
                         error:
@@ -727,7 +829,8 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
                 }
             } else {
                 return reply.code(400).send({
-                    error: "Provide either days or both from and to",
+                    error:
+                        "Provide either days or both startDate and endDate (or from and to) as YYYY-MM-DD",
                 });
             }
 
@@ -850,17 +953,56 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
             const selectedParityCurrent: ShopifyParityRawMetrics =
                 parityCurrentResult.metrics;
 
-            const ordersIncluded = s.ordersIncluded;
-            const incomeNetoStr = s.incomeNeto;
+            const exclusionPredicateSummary = q.includeExcluded
+                ? sql`TRUE`
+                : sql`excluded = false`;
+            const newMetricsResult = await db.execute(sql`
+                SELECT
+                    COALESCE(SUM(order_revenue), 0)::text AS order_revenue,
+                    COALESCE(SUM(units_sold), 0)::bigint AS units_sold,
+                    COUNT(DISTINCT customer_id) FILTER (WHERE is_new_customer = true)::int AS new_customers,
+                    COUNT(DISTINCT customer_id) FILTER (WHERE is_new_customer = false)::int AS returning_customers,
+                    COUNT(*) FILTER (WHERE is_new_customer = true)::int AS new_customer_orders,
+                    COALESCE(SUM(order_revenue) FILTER (WHERE is_new_customer = true), 0)::text AS new_customer_revenue,
+                    COALESCE(SUM(order_revenue) FILTER (WHERE is_new_customer = false), 0)::text AS returning_customer_revenue
+                FROM order_income_v1
+                WHERE ${exclusionPredicateSummary}
+                    AND processed_at >= ${startUtc}
+                    AND processed_at <= ${endUtc}
+            `);
+            const newMetricsRows = (newMetricsResult as { rows: Record<string, unknown>[] }).rows ?? [];
+            const nm = newMetricsRows[0];
+
+            const ordersWithPositiveRevenue = s.ordersWithPositiveRevenue;
+            const incomeNetoProductOnlyStr = s.incomeNetoProductOnly;
             const aovNetoStr =
-                ordersIncluded > 0
-                    ? new Decimal(incomeNetoStr).div(ordersIncluded).toFixed(6)
+                ordersWithPositiveRevenue > 0
+                    ? roundToDecimalsHalfEven(
+                          new Decimal(incomeNetoProductOnlyStr)
+                              .div(ordersWithPositiveRevenue)
+                              .toString(),
+                          6,
+                      )
                     : "0.000000";
 
             const payload: Record<string, unknown> = {
                 range: { from, to, timezone: tz },
                 currencyCode: s.currencyCode,
-                orderRevenue: toMoneyValue(s.lineItemsSubtotal),
+                orderRevenue: toMoneyValue(s.incomeNeto),
+                unitsSold: nm ? Number(nm.units_sold ?? 0) : 0,
+                newCustomers: nm ? Number(nm.new_customers ?? 0) : 0,
+                returningCustomers: nm
+                    ? Number(nm.returning_customers ?? 0)
+                    : 0,
+                newCustomerOrders: nm
+                    ? Number(nm.new_customer_orders ?? 0)
+                    : 0,
+                newCustomerRevenue: toMoneyValue(
+                    nm ? String(nm.new_customer_revenue ?? "0") : "0",
+                ),
+                returningCustomerRevenue: toMoneyValue(
+                    nm ? String(nm.returning_customer_revenue ?? "0") : "0",
+                ),
                 incomeBruto: toMoneyValue(s.incomeBruto),
                 refunds: toMoneyValue(refundsCurrent.refundsTotal),
                 refundsReportedAmount: toMoneyValue(
@@ -897,6 +1039,8 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
                 discountAmount: toMoneyValue(s.discountAmount),
                 ordersIncluded: s.ordersIncluded,
                 ordersExcludedInRange: s.ordersExcludedInRange,
+                incomeNetoProductOnly: toMoneyValue(s.incomeNetoProductOnly),
+                ordersWithPositiveRevenue: s.ordersWithPositiveRevenue,
                 aovNeto: toMoneyValue(aovNetoStr),
                 shopifyParityModel: ACTIVE_SHOPIFY_PARITY_MODEL,
                 ordersCountParity: parityCurrentResult.ordersCreatedInRange,
@@ -930,10 +1074,13 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
                         q.includeExcluded,
                     );
                     const aovPrevStr =
-                        sp.ordersIncluded > 0
-                            ? new Decimal(sp.incomeNeto)
-                                  .div(sp.ordersIncluded)
-                                  .toFixed(6)
+                        sp.ordersWithPositiveRevenue > 0
+                            ? roundToDecimalsHalfEven(
+                                  new Decimal(sp.incomeNetoProductOnly)
+                                      .div(sp.ordersWithPositiveRevenue)
+                                      .toString(),
+                                  6,
+                              )
                             : "0.000000";
                     const shopifyqlMetricsPrev = await getShopifyQLMetrics({
                         shopDomain: config.shopDomain,
@@ -956,9 +1103,36 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
                     const parityCurrent: ShopifyParityRawMetrics =
                         selectedParityCurrent;
 
+                    const newMetricsPrevResult = await db.execute(sql`
+                        SELECT
+                            COALESCE(SUM(order_revenue), 0)::text AS order_revenue,
+                            COALESCE(SUM(units_sold), 0)::bigint AS units_sold,
+                            COUNT(DISTINCT customer_id) FILTER (WHERE is_new_customer = true)::int AS new_customers,
+                            COUNT(DISTINCT customer_id) FILTER (WHERE is_new_customer = false)::int AS returning_customers,
+                            COUNT(*) FILTER (WHERE is_new_customer = true)::int AS new_customer_orders,
+                            COALESCE(SUM(order_revenue) FILTER (WHERE is_new_customer = true), 0)::text AS new_customer_revenue,
+                            COALESCE(SUM(order_revenue) FILTER (WHERE is_new_customer = false), 0)::text AS returning_customer_revenue
+                        FROM order_income_v1
+                        WHERE ${exclusionPredicateSummary}
+                            AND processed_at >= ${rangePrev.startUtc}
+                            AND processed_at <= ${rangePrev.endUtc}
+                    `);
+                    const newMetricsPrevRows = (newMetricsPrevResult as { rows: Record<string, unknown>[] }).rows ?? [];
+                    const nmPrev = newMetricsPrevRows[0];
+
                     payload.comparisonRange = { from: fromPrev, to: toPrev };
                     payload.comparison = {
-                        orderRevenue: toMoneyValue(sp.lineItemsSubtotal),
+                        orderRevenue: toMoneyValue(String(sp.incomeNeto ?? "0")),
+                        unitsSold: nmPrev ? Number(nmPrev.units_sold ?? 0) : 0,
+                        newCustomers: nmPrev ? Number(nmPrev.new_customers ?? 0) : 0,
+                        returningCustomers: nmPrev ? Number(nmPrev.returning_customers ?? 0) : 0,
+                        newCustomerOrders: nmPrev ? Number(nmPrev.new_customer_orders ?? 0) : 0,
+                        newCustomerRevenue: toMoneyValue(
+                            nmPrev ? String(nmPrev.new_customer_revenue ?? "0") : "0",
+                        ),
+                        returningCustomerRevenue: toMoneyValue(
+                            nmPrev ? String(nmPrev.returning_customer_revenue ?? "0") : "0",
+                        ),
                         incomeBruto: toMoneyValue(sp.incomeBruto),
                         refunds: toMoneyValue(refundsPrev.refundsTotal),
                         refundsReportedAmount: toMoneyValue(
@@ -996,14 +1170,40 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
                         taxAmount: toMoneyValue(sp.taxAmount),
                         discountAmount: toMoneyValue(sp.discountAmount),
                         ordersIncluded: sp.ordersIncluded,
+                        incomeNetoProductOnly: toMoneyValue(sp.incomeNetoProductOnly),
+                        ordersWithPositiveRevenue: sp.ordersWithPositiveRevenue,
                         aovNeto: toMoneyValue(aovPrevStr),
                         shopifyParity: toShopifyParityMoneyValues(parityPrev),
                     };
 
                     payload.deltas = {
                         orderRevenue: computeDeltaPercent(
-                            s.lineItemsSubtotal,
-                            sp.lineItemsSubtotal,
+                            s.incomeNeto,
+                            sp.incomeNeto,
+                        ),
+                        unitsSold: computeDeltaPercent(
+                            nm ? Number(nm.units_sold ?? 0) : 0,
+                            nmPrev ? Number(nmPrev.units_sold ?? 0) : 0,
+                        ),
+                        newCustomers: computeDeltaPercent(
+                            nm ? Number(nm.new_customers ?? 0) : 0,
+                            nmPrev ? Number(nmPrev.new_customers ?? 0) : 0,
+                        ),
+                        returningCustomers: computeDeltaPercent(
+                            nm ? Number(nm.returning_customers ?? 0) : 0,
+                            nmPrev ? Number(nmPrev.returning_customers ?? 0) : 0,
+                        ),
+                        newCustomerOrders: computeDeltaPercent(
+                            nm ? Number(nm.new_customer_orders ?? 0) : 0,
+                            nmPrev ? Number(nmPrev.new_customer_orders ?? 0) : 0,
+                        ),
+                        newCustomerRevenue: computeDeltaPercent(
+                            nm ? String(nm.new_customer_revenue ?? "0") : "0",
+                            nmPrev ? String(nmPrev.new_customer_revenue ?? "0") : "0",
+                        ),
+                        returningCustomerRevenue: computeDeltaPercent(
+                            nm ? String(nm.returning_customer_revenue ?? "0") : "0",
+                            nmPrev ? String(nmPrev.returning_customer_revenue ?? "0") : "0",
                         ),
                         incomeBruto: computeDeltaPercent(
                             s.incomeBruto,
