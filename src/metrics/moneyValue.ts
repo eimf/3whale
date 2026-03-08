@@ -12,6 +12,22 @@ const RAW_DECIMALS = 6;
 const DISPLAY_DECIMALS = 2;
 
 /**
+ * Round a decimal string to the given number of decimal places using banker's rounding (half-even).
+ * Used for True AOV to match Triple Whale.
+ */
+export function roundToDecimalsHalfEven(value: string, decimals: number): string {
+  const s = String(value).trim() || "0";
+  let d: Decimal;
+  try {
+    d = new Decimal(s);
+  } catch {
+    return decimals <= 0 ? "0" : "0." + "0".repeat(decimals);
+  }
+  if (!d.isFinite()) return decimals <= 0 ? "0" : "0." + "0".repeat(decimals);
+  return d.toDecimalPlaces(decimals, Decimal.ROUND_HALF_EVEN).toFixed(decimals);
+}
+
+/**
  * Normalize a decimal string to exactly 6 decimal places (canonical raw).
  * Handles invalid input by treating as "0".
  */

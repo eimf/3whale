@@ -86,6 +86,10 @@ export interface ListOrdersResult {
         discountAmount: string;
         ordersIncluded: number;
         ordersExcludedInRange: number;
+        /** Triple Whale True AOV: sum(income_neto - shipping_amount) for orders with income_neto > 0 */
+        incomeNetoProductOnly: string;
+        /** Triple Whale True AOV: count of orders with income_neto > 0 */
+        ordersWithPositiveRevenue: number;
     };
 }
 
@@ -150,6 +154,8 @@ export async function listOrders(params: {
             shippingAmount: sql<string>`COALESCE(SUM(${orderIncomeV1.shippingAmount}), 0)::text`,
             taxAmount: sql<string>`COALESCE(SUM(${orderIncomeV1.taxAmount}), 0)::text`,
             discountAmount: sql<string>`COALESCE(SUM(${orderIncomeV1.discountAmount}), 0)::text`,
+            incomeNetoProductOnly: sql<string>`COALESCE(SUM(${orderIncomeV1.incomeNeto} - ${orderIncomeV1.shippingAmount}) FILTER (WHERE ${orderIncomeV1.incomeNeto} > 0), 0)::text`,
+            ordersWithPositiveRevenue: sql<number>`COUNT(*) FILTER (WHERE ${orderIncomeV1.incomeNeto} > 0)::int`,
         })
         .from(orderIncomeV1)
         .where(whereIncluded);
@@ -174,6 +180,10 @@ export async function listOrders(params: {
             discountAmount: s ? toMoneyString(s.discountAmount) : "0.000000",
             ordersIncluded: total,
             ordersExcludedInRange,
+            incomeNetoProductOnly: s
+                ? toMoneyString(s.incomeNetoProductOnly)
+                : "0.000000",
+            ordersWithPositiveRevenue: s?.ordersWithPositiveRevenue ?? 0,
         },
     };
 }
@@ -572,12 +582,25 @@ export async function getShopifyCanonicalParity(params: {
     startUtc: Date;
     endUtc: Date;
     includeExcluded: boolean;
+    shopifyqlMetrics?: {
+        orders: number;
+        grossSales: number;
+        discounts: number;
+        returns: number;
+        netSales: number;
+        shippingCharges: number;
+        taxes: number;
+        totalSales: number;
+    } | null;
 }): Promise<ShopifyCanonicalParityResult> {
-    const { startUtc, endUtc, includeExcluded } = params;
+    const { startUtc, endUtc, includeExcluded, shopifyqlMetrics } = params;
     // Order count: include cancelled, exclude only test (and deleted if present). When includeExcluded=true, count all in range.
     const orderCountPredicate = includeExcluded
         ? sql`TRUE`
-        : sql`(excluded = false OR excluded_reason = 'cancelled')`;
+        : sql`(excluded = false OR excluded_reason = 'cancelled' OR excluded_reason = 'fully_refunded')`;
+    const refundOrderPredicate = includeExcluded
+        ? sql`TRUE`
+        : sql`(oi_rf.excluded_reason IS DISTINCT FROM 'test')`;
     // Financial metrics: only non-cancelled, non-test (match Shopify Analytics: do NOT exclude fully_refunded).
     // So we do not filter by excluded here — only by cancelled and test from payload.
     const notCancelledPredicate = sql`(
@@ -609,10 +632,10 @@ export async function getShopifyCanonicalParity(params: {
         ),
         order_money AS (
             SELECT
-                COALESCE(SUM(COALESCE(NULLIF(payload->'subtotalPriceSet'->'shopMoney'->>'amount', ''), '0')::numeric), 0)::text AS subtotal_total,
-                COALESCE(SUM(COALESCE(NULLIF(payload->'totalDiscountsSet'->'shopMoney'->>'amount', ''), '0')::numeric), 0)::text AS discounts_total,
-                COALESCE(SUM(COALESCE(NULLIF(payload->'totalShippingPriceSet'->'shopMoney'->>'amount', ''), '0')::numeric), 0)::text AS shipping_total,
-                COALESCE(SUM(COALESCE(NULLIF(payload->'totalTaxSet'->'shopMoney'->>'amount', ''), '0')::numeric), 0)::text AS tax_total
+                COALESCE(SUM(COALESCE(NULLIF(payload->'currentSubtotalPriceSet'->'shopMoney'->>'amount', ''), '0')::numeric), 0)::text AS subtotal_total,
+                COALESCE(SUM(COALESCE(NULLIF(payload->'currentTotalDiscountsSet'->'shopMoney'->>'amount', ''), '0')::numeric), 0)::text AS discounts_total,
+                COALESCE(SUM(COALESCE(NULLIF(payload->'currentShippingPriceSet'->'shopMoney'->>'amount', ''), '0')::numeric), 0)::text AS shipping_total,
+                COALESCE(SUM(COALESCE(NULLIF(payload->'currentTotalTaxSet'->'shopMoney'->>'amount', ''), '0')::numeric), 0)::text AS tax_total
             FROM financial_orders
         ),
         created_refunds AS (
@@ -628,7 +651,9 @@ export async function getShopifyCanonicalParity(params: {
                 COALESCE(SUM(rf.refund_order_adjustments_amount), 0)::text AS order_adjustments,
                 COALESCE(SUM(rf.refund_order_adjustments_tax_amount), 0)::text AS order_adjustments_tax
             FROM order_refund_event_v1 rf
-            WHERE rf.refund_created_at >= ${startUtc}
+            INNER JOIN order_income_v1 oi_rf ON oi_rf.shopify_order_id = rf.shopify_order_id
+            WHERE ${refundOrderPredicate}
+                AND rf.refund_created_at >= ${startUtc}
                 AND rf.refund_created_at <= ${endUtc}
         )
         SELECT
@@ -650,7 +675,7 @@ export async function getShopifyCanonicalParity(params: {
             cr.order_adjustments_tax AS created_order_adjustments_tax,
 
             (COALESCE(om.subtotal_total::numeric, 0) + COALESCE(om.discounts_total::numeric, 0))::text AS total_base_gross_sales,
-            (COALESCE(om.subtotal_total::numeric, 0) - COALESCE(cr.line_items_gross::numeric, 0))::text AS total_base_with_created_returns_net_sales,
+            (COALESCE(om.subtotal_total::numeric, 0) - COALESCE(cr.line_items_amount::numeric, 0))::text AS total_base_with_created_returns_net_sales,
             (COALESCE(om.shipping_total::numeric, 0) - COALESCE(cr.shipping::numeric, 0))::text AS total_base_shipping_charges,
             (COALESCE(om.tax_total::numeric, 0)
                 - COALESCE(cr.line_items_tax::numeric, 0)
@@ -659,7 +684,7 @@ export async function getShopifyCanonicalParity(params: {
                 - COALESCE(cr.order_adjustments_tax::numeric, 0))::text AS total_base_taxes,
 
             (0 - COALESCE(om.discounts_total::numeric, 0))::text AS total_base_discounts_signed,
-            (0 - COALESCE(cr.line_items_gross::numeric, 0))::text AS created_returns_signed,
+            (0 - COALESCE(cr.line_items_amount::numeric, 0))::text AS created_returns_signed,
             GREATEST(COALESCE(cr.order_adjustments::numeric, 0), 0)::text AS created_return_fees
         FROM order_counts oc
         CROSS JOIN order_money om
@@ -669,28 +694,52 @@ export async function getShopifyCanonicalParity(params: {
     const row = (result as { rows: Record<string, unknown>[] }).rows?.[0] ?? {};
 
     const sumToFixed6 = (...vals: unknown[]): string => {
-        const total = vals.reduce((acc, v) => acc + Number(v ?? 0), 0);
+        const total = vals.reduce<number>(
+            (acc, v) => acc + Number(v ?? 0),
+            0,
+        );
         return total.toFixed(6);
     };
 
+    const useShopifyQL = shopifyqlMetrics != null;
+
+    const grossSales = useShopifyQL
+        ? shopifyqlMetrics.grossSales.toFixed(6)
+        : toMoneyString(row.total_base_gross_sales);
+    const discounts = useShopifyQL
+        ? shopifyqlMetrics.discounts.toFixed(6)
+        : toMoneyString(row.total_base_discounts_signed);
+    const returns = useShopifyQL
+        ? shopifyqlMetrics.returns.toFixed(6)
+        : toMoneyString(row.created_returns_signed);
+    const shippingCharges = useShopifyQL
+        ? shopifyqlMetrics.shippingCharges.toFixed(6)
+        : toMoneyString(row.total_base_shipping_charges);
+    const taxes = useShopifyQL
+        ? shopifyqlMetrics.taxes.toFixed(6)
+        : toMoneyString(row.total_base_taxes);
+    const netSales = useShopifyQL
+        ? shopifyqlMetrics.netSales.toFixed(6)
+        : toMoneyString(row.total_base_with_created_returns_net_sales);
+    const totalSales = useShopifyQL
+        ? shopifyqlMetrics.totalSales.toFixed(6)
+        : sumToFixed6(netSales, shippingCharges, taxes);
+
     const metrics = {
-        grossSales: toMoneyString(row.total_base_gross_sales),
-        discounts: toMoneyString(row.total_base_discounts_signed),
-        returns: toMoneyString(row.created_returns_signed),
-        netSales: toMoneyString(row.total_base_with_created_returns_net_sales),
-        shippingCharges: toMoneyString(row.total_base_shipping_charges),
+        grossSales,
+        discounts,
+        returns,
+        netSales,
+        shippingCharges,
         returnFees: toMoneyString(row.created_return_fees),
-        taxes: toMoneyString(row.total_base_taxes),
-        totalSales: sumToFixed6(
-            row.total_base_with_created_returns_net_sales,
-            row.total_base_shipping_charges,
-            row.created_return_fees,
-            row.total_base_taxes,
-        ),
+        taxes,
+        totalSales,
     };
 
     return {
-        ordersCreatedInRange: Number(row.orders_processed_in_range ?? 0),
+        ordersCreatedInRange: useShopifyQL
+            ? shopifyqlMetrics.orders
+            : Number(row.orders_processed_in_range ?? 0),
         orderMoney: {
             subtotalTotal: toMoneyString(row.subtotal_total),
             discountsTotal: toMoneyString(row.discounts_total),

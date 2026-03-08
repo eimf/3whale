@@ -90,6 +90,70 @@ describe("getShopifyCanonicalParity", () => {
         expect(sqlText).toContain("payload->>'test'");
         expect(sqlText).toContain("rf.refund_created_at >=");
         expect(sqlText).toContain("rf.refund_created_at <=");
+        expect(sqlText).toContain("oi_rf.shopify_order_id");
+        expect(sqlText).toContain("currentSubtotalPriceSet");
+        expect(sqlText).toContain("currentTotalDiscountsSet");
+        expect(sqlText).toContain("currentShippingPriceSet");
+        expect(sqlText).toContain("currentTotalTaxSet");
+    });
+
+    it("uses all ShopifyQL metrics when provided, overriding DB values", async () => {
+        execute.mockResolvedValue({
+            rows: [
+                {
+                    orders_processed_in_range: 160,
+                    subtotal_total: "290000.000000",
+                    discounts_total: "120000.000000",
+                    shipping_total: "13000.000000",
+                    tax_total: "0.000000",
+                    created_refund_events_count: 5,
+                    created_line_items_amount: "3895.000000",
+                    created_line_items_gross: "7794.000000",
+                    created_line_items_tax: "0.000000",
+                    created_shipping: "0.000000",
+                    created_shipping_tax: "0.000000",
+                    created_duties: "0.000000",
+                    created_order_adjustments: "0.000000",
+                    created_order_adjustments_tax: "0.000000",
+                    total_base_gross_sales: "410000.000000",
+                    total_base_with_created_returns_net_sales: "286105.000000",
+                    total_base_shipping_charges: "13000.000000",
+                    total_base_taxes: "0.000000",
+                    total_base_discounts_signed: "-120000.000000",
+                    created_returns_signed: "-3895.000000",
+                    created_return_fees: "0.000000",
+                },
+            ],
+        });
+
+        const { getShopifyCanonicalParity } = await import(
+            "../incomeQueries.js"
+        );
+
+        const result = await getShopifyCanonicalParity({
+            startUtc: new Date("2026-02-28T06:00:00.000Z"),
+            endUtc: new Date("2026-03-01T05:59:59.999Z"),
+            includeExcluded: false,
+            shopifyqlMetrics: {
+                orders: 169,
+                grossSales: 425279,
+                discounts: -126096.1,
+                returns: -9304.3,
+                netSales: 289878.6,
+                shippingCharges: 13547,
+                taxes: 0,
+                totalSales: 303425.6,
+            },
+        });
+
+        expect(result.ordersCreatedInRange).toBe(169);
+        expect(result.metrics.grossSales).toBe("425279.000000");
+        expect(result.metrics.discounts).toBe("-126096.100000");
+        expect(result.metrics.returns).toBe("-9304.300000");
+        expect(result.metrics.netSales).toBe("289878.600000");
+        expect(result.metrics.shippingCharges).toBe("13547.000000");
+        expect(result.metrics.taxes).toBe("0.000000");
+        expect(result.metrics.totalSales).toBe("303425.600000");
     });
 
     it("returns signed discounts/returns and totalSales formula aligned to Shopify semantics", async () => {
@@ -138,6 +202,6 @@ describe("getShopifyCanonicalParity", () => {
         expect(result.metrics.shippingCharges).toBe("13547.000000");
         expect(result.metrics.returnFees).toBe("0.400000");
         expect(result.metrics.taxes).toBe("0.000000");
-        expect(result.metrics.totalSales).toBe("303425.600000");
+        expect(result.metrics.totalSales).toBe("303425.200000");
     });
 });

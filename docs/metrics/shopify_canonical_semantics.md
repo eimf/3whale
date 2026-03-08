@@ -2,46 +2,66 @@
 
 This document pins the canonical Shopify parity behavior used by `summary-v2`.
 
-## Scope and attribution
+## Architecture: ShopifyQL as source of truth
 
-- **Order timestamp**: Use **order processed date** (`Order.processedAt`) in store timezone for order-side attribution (not `createdAt`).
-- Order-side metrics (order count, `gross sales`, `discounts`, base `shipping`, base `taxes`) are attributed to **processed date** in store timezone.
-- Return-side metrics are attributed to **refund created date** (`Refund.createdAt`) in store timezone.
-- Store timezone comes from `shop_config.timezone_iana`.
-- Window conversion is local-date range (`from`/`to`) converted to UTC via `parseLocalDateRangeToUtc`.
+All 8 canonical parity metrics come from the **ShopifyQL Analytics API** (`FROM sales`).
+This guarantees exact parity with Shopify Analytics by using the same calculation engine.
 
-## Order count vs financial metrics
+| Metric | Source | ShopifyQL Column |
+|--------|--------|------------------|
+| Orders # | ShopifyQL | `orders` |
+| Gross Sales | ShopifyQL | `gross_sales` |
+| Discounts | ShopifyQL | `discounts` |
+| Returns | ShopifyQL | `returns` |
+| Net Sales | ShopifyQL | `net_sales` |
+| Shipping | ShopifyQL | `shipping_charges` |
+| Taxes | ShopifyQL | `taxes` |
+| Total Sales | ShopifyQL | `total_sales` |
 
-- **Orders #** (order count): Count all orders with `processedAt` in range. **Include cancelled** orders. Exclude only **test** and **deleted** (when applicable). Exposed as `ordersCountParity` in summary-v2.
-- **Financial metrics** (gross sales, discounts, shipping, taxes): **Exclude cancelled** orders (`order.cancelledAt` IS NULL). Exclude test and deleted. Exclude tips from all metrics. Gift card purchases included in gross sales; gift card redemptions included in discounts.
-- **Returns**: Product-only (line-item gross amounts). Refunded shipping/taxes are not part of returns; they reduce Shipping charges and Taxes. Attribution by `refund.createdAt`.
+**Requirements:**
+- API version `>= 2025-10` (field `shopifyqlQuery` not available in earlier versions)
+- Access scope: `read_reports`
+- When ShopifyQL is unavailable, falls back to DB-computed values from synced GraphQL data
 
-## Canonical formulas
+**Fallback (DB-computed):**
+When the `read_reports` scope is missing or the API version is too old, the system
+falls back to computing metrics from `shopify_order_raw` (using `current*` fields)
+and `order_refund_event_v1`. This fallback is less accurate for Returns (misses
+order edits, restock-only returns, internal adjustments) and has minor gaps in
+Gross Sales, Discounts, and Shipping due to Shopify Analytics using internal
+line-item calculations not fully exposed by the Admin API.
 
-All values below are canonical for `shopifyParity` in `GET /internal/income/summary-v2`:
+## ShopifyQL query
 
-- `grossSales = subtotal_total + discounts_total` (from non-cancelled, non-test orders)
-- `discounts = -discounts_total`
-- `returns = -SUM(refund_line_items_gross_amount)` for refunds with `refund_created_at` in range (product-only; matches Shopify Analytics refundLineItems).
+```
+FROM sales
+SHOW orders, gross_sales, discounts, returns, net_sales, shipping_charges, taxes, total_sales
+SINCE {fromDate}
+UNTIL {toDate}
+```
+
+## Fallback formulas (DB-computed, less accurate)
+
+- `grossSales = currentSubtotal_total + currentDiscounts_total`
+- `discounts = -currentDiscounts_total`
+- `returns = -SUM(refund_line_items_amount)` from `order_refund_event_v1`
 - `netSales = grossSales + discounts + returns`
-- `shippingCharges = shipping_total - refunds_shipping_created`  
-  Refund shipping: use `RefundShippingLine.amountSet` when present (Shopify Analytics parity), else `subtotalAmountSet`; stored in `order_refund_event_v1.refund_shipping_amount`.
-- `taxes = tax_total - refunds_line_items_tax - refunds_shipping_tax - refunds_duties - refunds_order_adjustments_tax`
-- `returnFees = max(refunds_order_adjustments_amount, 0)`
-- `totalSales = netSales + shippingCharges + taxes + returnFees`
+- `shippingCharges = currentShipping_total - refunds_shipping`
+- `taxes = currentTax_total - refund tax components`
+- `totalSales = netSales + shippingCharges + taxes`
 
 ## Sign conventions
 
 - `discounts` and `returns` are reported as negative values.
 - `shippingCharges` and `taxes` can be negative when refund components exceed order-period base components.
-- `grossSales`, `netSales`, and `totalSales` may be positive or negative depending on data.
 
 ## Inclusion/exclusion
 
 Parity follows the endpoint filter:
 
-- `includeExcluded=false` => order count: only orders with `excluded = false` OR `excluded_reason = 'cancelled'`. **Financials**: from orders where `cancelledAt`/`canceledAt` is null and `test` is false only (do not filter by `excluded`; matches Shopify Analytics “active orders”).
+- `includeExcluded=false` => order count: only orders with `excluded = false` OR `excluded_reason = 'cancelled'` OR `excluded_reason = 'fully_refunded'`. **Financials**: from orders where `cancelledAt`/`canceledAt` is null and `test` is false only (do not filter by `excluded`; matches Shopify Analytics "active orders").
 - `includeExcluded=true` => order count: all orders in range; financials/refunds include all.
+- Note: ShopifyQL does not support `includeExcluded` filtering. When ShopifyQL is active, the parity values reflect Shopify Analytics' own inclusion logic.
 
 ## Model invariants
 

@@ -68,6 +68,10 @@ curl -s -X POST http://localhost:3000/internal/bootstrap \
 curl -s -X POST http://localhost:3000/internal/sync/run \
   -H "x-internal-api-key: YOUR_INTERNAL_API_KEY"
 
+# Full sync / reconcile: reset watermark then sync (re-fetches last 90 days)
+curl -s -X POST "http://localhost:3000/internal/sync/run?fullSync=true" \
+  -H "x-internal-api-key: YOUR_INTERNAL_API_KEY"
+
 # Check sync status and counts
 curl -s http://localhost:3000/internal/sync-status \
   -H "x-internal-api-key: YOUR_INTERNAL_API_KEY"
@@ -98,7 +102,7 @@ curl -s "http://localhost:3000/internal/income/daily?days=7" \
 | ------ | ------------------------------------------ | ------------------------------------------------- |
 | GET    | /internal/health                           | No auth; health check                             |
 | POST   | /internal/bootstrap                        | Upsert shop_config from env; ensure sync_state    |
-| POST   | /internal/sync/run                         | Enqueue sync job; returns `{ jobId }`             |
+| POST   | /internal/sync/run                         | Enqueue sync job; returns `{ jobId }`. Optional `?fullSync=true` to reset watermark and re-fetch last 90 days (reconcile). |
 | GET    | /internal/sync-status                      | shop_config, sync_state, last 10 run logs, counts |
 | GET    | /internal/income/daily?days=1\|2\|3\|7\|30 | Daily income series (strings, excluded=false)     |
 

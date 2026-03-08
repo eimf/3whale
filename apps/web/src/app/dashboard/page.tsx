@@ -2,10 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
-import { useTranslations } from "next-intl";
+import { useTranslations, useLocale } from "next-intl";
 import { setComparing, setTimezoneIana } from "@/store/dashboardSlice";
 import type { RootState } from "@/store/store";
-import { formatMoneyMXN } from "@/lib/formatMoneyMXN";
 import type {
     DailyPointV2,
     SummaryV2,
@@ -19,7 +18,7 @@ import {
 } from "@/components/dashboard/MetricDrilldownDialog";
 import type { BarSeriesPoint } from "@/components/dashboard/MetricBarsChart";
 import { ShoppingBagIcon } from "@/components/dashboard/ShoppingBagIcon";
-import { TileSparkline } from "@/components/dashboard/TileSparkline";
+import { ChartSparkline } from "@/components/dashboard/ChartSparkline";
 import {
     RangeSelectorPopover,
     getRangeTriggerLabel,
@@ -27,6 +26,7 @@ import {
 import { SyncControls } from "@/components/dashboard/SyncControls";
 import { getRequestQueryString } from "@/lib/dateRangeParams";
 import { formatBucketLabel } from "@/lib/hourLabel";
+import { formatMetricValue } from "@/lib/formatMetric";
 import {
     metricsMeta,
     TILE_METRIC_KEYS,
@@ -165,6 +165,51 @@ function getBarsSeriesForMetric(
             y: Number(r.discountAmount.raw),
         }));
     }
+    if (metricKey === "unitsSold") {
+        return data.map((r) => ({
+            x: label(r),
+            y: r.unitsSold ?? 0,
+        }));
+    }
+    if (metricKey === "newCustomers") {
+        return data.map((r) => ({
+            x: label(r),
+            y: r.newCustomers ?? 0,
+        }));
+    }
+    if (metricKey === "returningCustomers") {
+        return data.map((r) => ({
+            x: label(r),
+            y: r.returningCustomers ?? 0,
+        }));
+    }
+    if (metricKey === "newCustomerOrders") {
+        return data.map((r) => ({
+            x: label(r),
+            y: r.newCustomerOrders ?? 0,
+        }));
+    }
+    if (metricKey === "newCustomerRevenue") {
+        return data.map((r) => ({
+            x: label(r),
+            y: Number(r.newCustomerRevenue?.raw ?? "0"),
+        }));
+    }
+    if (metricKey === "returningCustomerRevenue") {
+        return data.map((r) => ({
+            x: label(r),
+            y: Number(r.returningCustomerRevenue?.raw ?? "0"),
+        }));
+    }
+    if (metricKey === "trueAov" || metricKey === "averageOrderValue" || metricKey === "aov") {
+        return data.map((r) => {
+            const orders = r.ordersCount ?? 0;
+            const productRevenue =
+                Number(r.incomeNeto.raw) - Number(r.shippingAmount.raw);
+            const y = orders > 0 ? productRevenue / orders : 0;
+            return { x: label(r), y };
+        });
+    }
     return undefined;
 }
 
@@ -173,6 +218,8 @@ function getSummaryItemsForMetric(
     metricKey: DashboardMetricKey,
     data: DailyPointV2[] | null,
     granularity: "hour" | "day",
+    currencyCode: string,
+    locale: string,
 ): SummaryItem[] | undefined {
     if (!data || data.length === 0) return undefined;
     const slice = data.slice(-2);
@@ -180,7 +227,12 @@ function getSummaryItemsForMetric(
     const label = (d: string) => formatBucketLabel(d, granularity);
     const items: SummaryItem[] = [];
     for (const r of slice) {
-        const displayValue = getSummaryItemDisplayValue(metricKey, r);
+        const displayValue = getSummaryItemDisplayValue(
+            metricKey,
+            r,
+            currencyCode,
+            locale,
+        );
         if (displayValue != null)
             items.push({ label: label(r.date), displayValue });
     }
@@ -190,28 +242,61 @@ function getSummaryItemsForMetric(
 function getSummaryItemDisplayValue(
     metricKey: DashboardMetricKey,
     r: DailyPointV2,
+    currencyCode: string,
+    locale: string,
 ): string | null {
-    switch (metricKey) {
-        case "orderRevenue":
-            return `${formatMoneyMXN(r.orderRevenue.display)} MXN`;
-        case "netProfit":
-            return `${formatMoneyMXN(r.incomeNeto.display)} MXN`;
-        case "returns":
-            return `${formatMoneyMXN(r.refunds.display)} MXN`;
-        case "shippingCost":
-            return `${formatMoneyMXN(r.shippingAmount.display)} MXN`;
-        case "totalOrders":
-        case "ordersOverZero":
-            return String(r.ordersCount ?? 0);
-        case "grossSales":
-            return `${formatMoneyMXN(r.incomeBruto.display)} MXN`;
-        case "taxes":
-            return `${formatMoneyMXN(r.taxAmount.display)} MXN`;
-        case "discounts":
-            return `${formatMoneyMXN(r.discountAmount.display)} MXN`;
-        default:
-            return null;
-    }
+    const raw = (): number | null => {
+        switch (metricKey) {
+            case "orderRevenue":
+                return Number(r.orderRevenue.raw);
+            case "netProfit":
+                return Number(r.incomeNeto.raw);
+            case "returns":
+                return Number(r.refunds.raw);
+            case "shippingCost":
+                return Number(r.shippingAmount.raw);
+            case "totalOrders":
+            case "ordersOverZero":
+                return r.ordersCount ?? null;
+            case "grossSales":
+                return Number(r.incomeBruto.raw);
+            case "taxes":
+                return Number(r.taxAmount.raw);
+            case "discounts":
+                return Number(r.discountAmount.raw);
+            case "unitsSold":
+                return r.unitsSold ?? null;
+            case "newCustomers":
+                return r.newCustomers ?? null;
+            case "returningCustomers":
+                return r.returningCustomers ?? null;
+            case "newCustomerOrders":
+                return r.newCustomerOrders ?? null;
+            case "newCustomerRevenue":
+                return Number(r.newCustomerRevenue?.raw ?? "0");
+            case "returningCustomerRevenue":
+                return Number(r.returningCustomerRevenue?.raw ?? "0");
+            case "trueAov":
+            case "averageOrderValue":
+            case "aov": {
+                const orders = r.ordersCount ?? 0;
+                if (orders <= 0) return null;
+                const productRevenue =
+                    Number(r.incomeNeto.raw) - Number(r.shippingAmount.raw);
+                return productRevenue / orders;
+            }
+            default:
+                return null;
+        }
+    };
+    const v = raw();
+    if (v == null) return null;
+    return formatMetricValue({
+        metricKey,
+        value: v,
+        currencyCode,
+        locale,
+    });
 }
 
 /** Sparkline values from daily data (number for viz only). Empty array = show flat line. */
@@ -237,12 +322,34 @@ function getSparklineValues(
     if (metricKey === "taxes") return data.map((r) => Number(r.taxAmount.raw));
     if (metricKey === "discounts")
         return data.map((r) => Number(r.discountAmount.raw));
+    if (metricKey === "unitsSold")
+        return data.map((r) => r.unitsSold ?? 0);
+    if (metricKey === "newCustomers")
+        return data.map((r) => r.newCustomers ?? 0);
+    if (metricKey === "returningCustomers")
+        return data.map((r) => r.returningCustomers ?? 0);
+    if (metricKey === "newCustomerOrders")
+        return data.map((r) => r.newCustomerOrders ?? 0);
+    if (metricKey === "newCustomerRevenue")
+        return data.map((r) => Number(r.newCustomerRevenue?.raw ?? "0"));
+    if (metricKey === "returningCustomerRevenue")
+        return data.map((r) => Number(r.returningCustomerRevenue?.raw ?? "0"));
+    if (metricKey === "trueAov" || metricKey === "averageOrderValue" || metricKey === "aov") {
+        return data.map((r) => {
+            const orders = r.ordersCount ?? 0;
+            if (orders <= 0) return 0;
+            const productRevenue =
+                Number(r.incomeNeto.raw) - Number(r.shippingAmount.raw);
+            return productRevenue / orders;
+        });
+    }
     return [];
 }
 
 export default function DashboardPage() {
     const t = useTranslations();
     const tRange = useTranslations("dashboard.range");
+    const locale = useLocale();
     const dispatch = useDispatch();
     const rangePreset = useSelector((s: RootState) => s.dashboard.rangePreset);
     const rangeCustom = useSelector((s: RootState) => s.dashboard.rangeCustom);
@@ -367,18 +474,24 @@ export default function DashboardPage() {
         });
     }, [syncStatus, t]);
 
-    async function handleSyncNow() {
+    async function handleSyncNow(fullSync?: boolean) {
         setSyncing(true);
         setSyncMessage(null);
         setSyncError(null);
         try {
-            const res = await fetch("/api/sync/run", { method: "POST" });
+            const res = await fetch("/api/sync/run", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ fullSync: fullSync === true }),
+            });
             const body = await res.json().catch(() => ({}));
             if (!res.ok) {
                 setSyncError(body?.error ?? "Error");
                 return;
             }
-            setSyncMessage(t("sync.syncStarted"));
+            setSyncMessage(
+                fullSync ? t("sync.fullSyncStarted") : t("sync.syncStarted"),
+            );
             setTimeout(() => {
                 fetch("/api/sync/status")
                     .then((r) => (r.ok ? r.json() : null))
@@ -406,9 +519,33 @@ export default function DashboardPage() {
     );
 
     const drilldownSummaryItems = useMemo(
-        () => getSummaryItemsForMetric(selectedMetricKey, data, granularity),
-        [selectedMetricKey, data, granularity],
+        () =>
+            summary && data
+                ? getSummaryItemsForMetric(
+                      selectedMetricKey,
+                      data,
+                      granularity,
+                      summary.currencyCode ?? "MXN",
+                      locale,
+                  )
+                : undefined,
+        [selectedMetricKey, data, granularity, summary, locale],
     );
+
+    const drilldownBreakdownRows = useMemo((): Array<{ labelKey: string; value: string }> | undefined => {
+        if (!summary || (selectedMetricKey !== "trueAov" && selectedMetricKey !== "averageOrderValue")) return undefined;
+        const productOnly = summary.incomeNetoProductOnly;
+        const ordersPos = summary.ordersWithPositiveRevenue ?? 0;
+        const aov = summary.aovNeto;
+        if (productOnly == null || aov == null) return undefined;
+        const currencyCode = summary.currencyCode ?? "MXN";
+        const prefix = currencyCode === "MXN" ? "MX$" : `${currencyCode} `;
+        return [
+            { labelKey: "breakdown.netSalesOrdersValue", value: `${prefix}${productOnly.display ?? productOnly.raw}` },
+            { labelKey: "breakdown.ordersOverZero", value: String(ordersPos) },
+            { labelKey: "breakdown.trueAov", value: `${prefix}${aov.display ?? aov.raw}` },
+        ];
+    }, [selectedMetricKey, summary]);
 
     function openDrilldown(metricKey: DashboardMetricKey, title: string) {
         setSelectedMetricKey(metricKey);
@@ -469,46 +606,88 @@ export default function DashboardPage() {
 
     function getTileValue(metricKey: DashboardMetricKey): string {
         if (!summary) return "—";
+        const currencyCode = summary.currencyCode ?? "MXN";
         const parity = summary.shopifyParity;
+        let value: number | null = null;
         switch (metricKey) {
             case "orderRevenue":
-                return `${formatMoneyMXN(summary.orderRevenue.display)} MXN`;
+                value = Number(
+                    summary.orderRevenue?.raw ??
+                        summary.incomeNeto?.raw ??
+                        "0",
+                );
+                break;
             case "netProfit":
-                if (parity)
-                    return `${formatMoneyMXN(parity.netSales.display)} MXN`;
-                return `${formatMoneyMXN(summary.incomeNeto.display)} MXN`;
+                value = parity
+                    ? Number(parity.netSales.raw)
+                    : Number(summary.incomeNeto.raw);
+                break;
             case "returns":
-                if (parity)
-                    return `${formatMoneyMXN(parity.returns.display)} MXN`;
-                return `${formatMoneyMXN(summary.refunds.display)} MXN`;
+                value = parity
+                    ? Number(parity.returns.raw)
+                    : Number(summary.refunds.raw);
+                break;
             case "taxes":
-                if (parity)
-                    return `${formatMoneyMXN(parity.taxes.display)} MXN`;
-                return `${formatMoneyMXN(summary.taxAmount.display)} MXN`;
+                value = parity
+                    ? Number(parity.taxes.raw)
+                    : Number(summary.taxAmount.raw);
+                break;
             case "trueAov":
             case "averageOrderValue":
             case "aov":
-                return summary.ordersIncluded > 0
-                    ? `$${formatMoneyMXN(summary.aovNeto.display)}`
-                    : "—";
+                value =
+                    (summary.ordersWithPositiveRevenue ?? summary.ordersIncluded) > 0
+                        ? Number(summary.aovNeto.raw)
+                        : null;
+                break;
             case "totalOrders":
             case "ordersOverZero":
-                return summary.ordersIncluded.toLocaleString();
+                value = summary.ordersIncluded;
+                break;
             case "grossSales":
-                if (parity)
-                    return `${formatMoneyMXN(parity.grossSales.display)} MXN`;
-                return `${formatMoneyMXN(summary.incomeBruto.display)} MXN`;
+                value = parity
+                    ? Number(parity.grossSales.raw)
+                    : Number(summary.incomeBruto.raw);
+                break;
             case "shippingCost":
-                if (parity)
-                    return `${formatMoneyMXN(parity.shippingCharges.display)} MXN`;
-                return `${formatMoneyMXN(summary.shippingAmount.display)} MXN`;
+                value = parity
+                    ? Number(parity.shippingCharges.raw)
+                    : Number(summary.shippingAmount.raw);
+                break;
             case "discounts":
-                if (parity)
-                    return `${formatMoneyMXN(parity.discounts.display)} MXN`;
-                return `${formatMoneyMXN(summary.discountAmount.display)} MXN`;
+                value = parity
+                    ? Number(parity.discounts.raw)
+                    : Number(summary.discountAmount.raw);
+                break;
+            case "unitsSold":
+                value = summary.unitsSold ?? 0;
+                break;
+            case "newCustomers":
+                value = summary.newCustomers ?? 0;
+                break;
+            case "returningCustomers":
+                value = summary.returningCustomers ?? 0;
+                break;
+            case "newCustomerOrders":
+                value = summary.newCustomerOrders ?? 0;
+                break;
+            case "newCustomerRevenue":
+                value = Number(summary.newCustomerRevenue?.raw ?? "0");
+                break;
+            case "returningCustomerRevenue":
+                value = Number(
+                    summary.returningCustomerRevenue?.raw ?? "0",
+                );
+                break;
             default:
                 return "—";
         }
+        return formatMetricValue({
+            metricKey,
+            value,
+            currencyCode,
+            locale,
+        });
     }
 
     function getComparisonTotalForMetric(
@@ -517,46 +696,86 @@ export default function DashboardPage() {
     ): string | undefined {
         const comp = s.comparison;
         if (!comp) return undefined;
+        const currencyCode = s.currencyCode ?? "MXN";
         const parity = comp.shopifyParity;
+        let value: number | null = null;
         switch (metricKey) {
             case "orderRevenue":
-                return `${formatMoneyMXN(comp.orderRevenue.display)} MXN`;
+                value = Number(
+                    comp.orderRevenue?.raw ?? comp.incomeNeto?.raw ?? "0",
+                );
+                break;
             case "netProfit":
-                if (parity)
-                    return `${formatMoneyMXN(parity.netSales.display)} MXN`;
-                return `${formatMoneyMXN(comp.incomeNeto.display)} MXN`;
+                value = parity
+                    ? Number(parity.netSales.raw)
+                    : Number(comp.incomeNeto.raw);
+                break;
             case "returns":
-                if (parity)
-                    return `${formatMoneyMXN(parity.returns.display)} MXN`;
-                return `${formatMoneyMXN(comp.refunds.display)} MXN`;
+                value = parity
+                    ? Number(parity.returns.raw)
+                    : Number(comp.refunds.raw);
+                break;
             case "taxes":
-                if (parity)
-                    return `${formatMoneyMXN(parity.taxes.display)} MXN`;
-                return `${formatMoneyMXN(comp.taxAmount.display)} MXN`;
+                value = parity
+                    ? Number(parity.taxes.raw)
+                    : Number(comp.taxAmount.raw);
+                break;
             case "trueAov":
             case "averageOrderValue":
             case "aov":
-                return comp.ordersIncluded > 0
-                    ? `$${formatMoneyMXN(comp.aovNeto.display)}`
-                    : "—";
+                value =
+                    (comp.ordersWithPositiveRevenue ?? comp.ordersIncluded) > 0
+                        ? Number(comp.aovNeto.raw)
+                        : null;
+                break;
             case "totalOrders":
             case "ordersOverZero":
-                return comp.ordersIncluded.toLocaleString();
+                value = comp.ordersIncluded;
+                break;
             case "grossSales":
-                if (parity)
-                    return `${formatMoneyMXN(parity.grossSales.display)} MXN`;
-                return `${formatMoneyMXN(comp.incomeBruto.display)} MXN`;
+                value = parity
+                    ? Number(parity.grossSales.raw)
+                    : Number(comp.incomeBruto.raw);
+                break;
             case "shippingCost":
-                if (parity)
-                    return `${formatMoneyMXN(parity.shippingCharges.display)} MXN`;
-                return `${formatMoneyMXN(comp.shippingAmount.display)} MXN`;
+                value = parity
+                    ? Number(parity.shippingCharges.raw)
+                    : Number(comp.shippingAmount.raw);
+                break;
             case "discounts":
-                if (parity)
-                    return `${formatMoneyMXN(parity.discounts.display)} MXN`;
-                return `${formatMoneyMXN(comp.discountAmount.display)} MXN`;
+                value = parity
+                    ? Number(parity.discounts.raw)
+                    : Number(comp.discountAmount.raw);
+                break;
+            case "unitsSold":
+                value = comp.unitsSold ?? 0;
+                break;
+            case "newCustomers":
+                value = comp.newCustomers ?? 0;
+                break;
+            case "returningCustomers":
+                value = comp.returningCustomers ?? 0;
+                break;
+            case "newCustomerOrders":
+                value = comp.newCustomerOrders ?? 0;
+                break;
+            case "newCustomerRevenue":
+                value = Number(comp.newCustomerRevenue?.raw ?? "0");
+                break;
+            case "returningCustomerRevenue":
+                value = Number(
+                    comp.returningCustomerRevenue?.raw ?? "0",
+                );
+                break;
             default:
                 return undefined;
         }
+        return formatMetricValue({
+            metricKey,
+            value,
+            currencyCode,
+            locale,
+        });
     }
 
     if (loading) {
@@ -575,12 +794,9 @@ export default function DashboardPage() {
 
     return (
         <div className="p-6 space-y-6">
-            {/* Toolbar: single row — left: title + range + comparison; right: sync controls */}
+            {/* Toolbar: single row — range + comparison; right: sync controls */}
             <div className="flex flex-wrap items-center justify-between gap-4">
                 <div className="flex flex-wrap items-center gap-3 min-w-0 flex-1">
-                    <h1 className="text-2xl font-semibold text-zinc-100 tracking-wide shrink-0">
-                        {t("dashboard.title")}
-                    </h1>
                     <RangeSelectorPopover
                         triggerLabel={triggerLabel}
                         timezoneIana={timezoneIana ?? "America/Mexico_City"}
@@ -650,7 +866,7 @@ export default function DashboardPage() {
                 </div>
 
                 <TooltipProvider delayDuration={300}>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
                         {tileConfigs.map((config) => {
                             const meta = metricsMeta[config.metricKey];
                             const title = t(meta.titleKey);
@@ -659,6 +875,10 @@ export default function DashboardPage() {
                                 config.metricKey,
                                 data,
                             );
+                            const sparklineLabels =
+                                data?.map((r) =>
+                                    formatBucketLabel(r.date, granularity),
+                                ) ?? [];
                             const delta = isComparing
                                 ? getTileDelta(config.metricKey)
                                 : null;
@@ -702,46 +922,62 @@ export default function DashboardPage() {
                                     onClick={() =>
                                         openDrilldown(config.metricKey, title)
                                     }
-                                    className="bg-zinc-800 rounded-lg p-4 border border-zinc-700 text-left w-full hover:bg-zinc-700/90 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-zinc-950 flex flex-col"
+                                    className="flex flex-col rounded-xl bg-zinc-900 border border-zinc-800/50 p-2 sm:p-2.5 shadow-sm min-h-[88px] transition-all duration-150 ease-out hover:-translate-y-0.5 hover:shadow-lg hover:shadow-black/50 hover:border-zinc-700 text-left w-full focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-zinc-950 overflow-visible"
                                 >
-                                    <div className="flex items-center gap-2 flex-wrap">
-                                        <ShoppingBagIcon />
-                                        <TooltipRoot>
-                                            <TooltipTrigger asChild>
-                                                <span className="text-xs font-medium text-zinc-400 uppercase tracking-wider cursor-help focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-1 rounded">
-                                                    {title}
+                                    {/* Header */}
+                                    <div className="flex items-center gap-2">
+                                        <div className="shrink-0">
+                                            <ShoppingBagIcon />
+                                        </div>
+                                        <div className="min-w-0 flex-1">
+                                            <TooltipRoot>
+                                                <TooltipTrigger asChild>
+                                                    <div className="text-sm text-zinc-300 font-medium truncate cursor-help focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-1 rounded">
+                                                        {title}
+                                                    </div>
+                                                </TooltipTrigger>
+                                                <TooltipPortal>
+                                                    <TooltipContent>
+                                                        <p>{description}</p>
+                                                        {formula && (
+                                                            <p className="mt-1.5 text-zinc-400 font-mono text-xs">
+                                                                {formula}
+                                                            </p>
+                                                        )}
+                                                        {note && (
+                                                            <p className="mt-1 text-amber-200/90 text-xs">
+                                                                {note}
+                                                            </p>
+                                                        )}
+                                                    </TooltipContent>
+                                                </TooltipPortal>
+                                            </TooltipRoot>
+                                        </div>
+                                        <div className="shrink-0">
+                                            {deltaLabel != null && (
+                                                <span
+                                                    className={`text-[11px] lg:text-xs font-medium ${deltaColor}`}
+                                                >
+                                                    {deltaLabel}
                                                 </span>
-                                            </TooltipTrigger>
-                                            <TooltipPortal>
-                                                <TooltipContent>
-                                                    <p>{description}</p>
-                                                    {formula && (
-                                                        <p className="mt-1.5 text-zinc-400 font-mono text-xs">
-                                                            {formula}
-                                                        </p>
-                                                    )}
-                                                    {note && (
-                                                        <p className="mt-1 text-amber-200/90 text-xs">
-                                                            {note}
-                                                        </p>
-                                                    )}
-                                                </TooltipContent>
-                                            </TooltipPortal>
-                                        </TooltipRoot>
-                                        {deltaLabel != null && (
-                                            <span
-                                                className={`text-xs font-medium ${deltaColor}`}
-                                            >
-                                                {deltaLabel}
-                                            </span>
-                                        )}
+                                            )}
+                                        </div>
                                     </div>
-                                    <div className="text-xl font-semibold text-zinc-100 mt-1">
+                                    {/* Value */}
+                                    <div className="mt-0.5 text-xl sm:text-2xl font-semibold text-zinc-50 truncate leading-none">
                                         {value}
                                     </div>
-                                    <div className="mt-2 flex items-end justify-start min-h-[36px]">
-                                        <TileSparkline
+                                    {/* Chart */}
+                                    <div className="mt-1 flex-1 w-full min-h-[22px] relative overflow-visible">
+                                        <ChartSparkline
                                             values={sparklineValues}
+                                            labels={sparklineLabels}
+                                            granularity={granularity}
+                                            metricKey={config.metricKey}
+                                            currencyCode={
+                                                summary.currencyCode ?? "MXN"
+                                            }
+                                            locale={locale}
                                         />
                                     </div>
                                 </button>
@@ -788,6 +1024,9 @@ export default function DashboardPage() {
                           )
                         : undefined
                 }
+                currencyCode={summary?.currencyCode ?? "MXN"}
+                locale={locale}
+                breakdownRows={drilldownBreakdownRows}
             />
         </div>
     );

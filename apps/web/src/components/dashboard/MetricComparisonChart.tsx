@@ -13,6 +13,12 @@ import {
 } from "chart.js";
 import { Chart as ChartJS } from "chart.js";
 import type { BarSeriesPoint } from "./MetricBarsChart";
+import type { DashboardMetricKey } from "@/types/metrics";
+import {
+  formatTooltipTitle,
+  formatMetricValue,
+  formatAxisTick,
+} from "@/lib/formatMetric";
 
 ChartJS.register(
   CategoryScale,
@@ -24,18 +30,16 @@ ChartJS.register(
   Tooltip
 );
 
-function formatAxisValue(value: number): string {
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
-  if (value >= 1_000) return `${(value / 1_000).toFixed(0)}K`;
-  return String(value);
-}
-
 export interface MetricComparisonChartProps {
   currentSeries: BarSeriesPoint[];
   /** When empty or undefined, only current series is shown (solid cyan). */
   comparisonSeries?: BarSeriesPoint[];
   currentLabel?: string;
   comparisonLabel?: string;
+  metricKey: DashboardMetricKey;
+  granularity: "hour" | "day";
+  currencyCode: string;
+  locale?: string;
 }
 
 /**
@@ -48,15 +52,25 @@ export function MetricComparisonChart({
   comparisonSeries = [],
   currentLabel = "Current",
   comparisonLabel = "Previous",
+  metricKey,
+  granularity,
+  currencyCode,
+  locale = "en",
 }: MetricComparisonChartProps) {
-  const hasComparison = Array.isArray(comparisonSeries) && comparisonSeries.length > 0;
+  const hasComparison =
+    Array.isArray(comparisonSeries) && comparisonSeries.length > 0;
   const chartData = useMemo(() => {
-    const n = Math.max(currentSeries.length, comparisonSeries?.length ?? 0, 1);
-    const labels = currentSeries.length >= n
-      ? currentSeries.map((p) => p.x)
-      : (comparisonSeries?.length ?? 0) >= n
-        ? comparisonSeries!.map((p) => p.x)
-        : Array.from({ length: n }, (_, i) => String(i));
+    const n = Math.max(
+      currentSeries.length,
+      comparisonSeries?.length ?? 0,
+      1
+    );
+    const labels =
+      currentSeries.length >= n
+        ? currentSeries.map((p) => p.x)
+        : (comparisonSeries?.length ?? 0) >= n
+          ? comparisonSeries!.map((p) => p.x)
+          : Array.from({ length: n }, (_, i) => String(i));
     const currentValues = Array(n).fill(null);
     currentSeries.forEach((p, i) => {
       currentValues[i] = p.y;
@@ -104,7 +118,13 @@ export function MetricComparisonChart({
       });
     }
     return { labels, datasets };
-  }, [currentSeries, comparisonSeries, currentLabel, comparisonLabel, hasComparison]);
+  }, [
+    currentSeries,
+    comparisonSeries,
+    currentLabel,
+    comparisonLabel,
+    hasComparison,
+  ]);
 
   const options = useMemo(
     () => ({
@@ -112,13 +132,34 @@ export function MetricComparisonChart({
       maintainAspectRatio: true,
       interaction: { mode: "index" as const, intersect: false },
       plugins: {
-        legend: { display: true, labels: { color: "#a1a1aa", font: { size: 12 } } },
+        legend: {
+          display: true,
+          labels: { color: "#a1a1aa", font: { size: 12 } },
+        },
         tooltip: {
           backgroundColor: "rgb(39, 39, 42)",
           titleColor: "#e4e4e7",
           bodyColor: "#a1a1aa",
           borderColor: "rgba(255,255,255,0.1)",
           borderWidth: 1,
+          callbacks: {
+            title: (items: { label: string }[]) =>
+              items.length > 0
+                ? formatTooltipTitle({
+                    label: items[0].label,
+                    granularity,
+                    locale,
+                  })
+                : "",
+            label: (ctx: { raw: unknown }) =>
+              formatMetricValue({
+                metricKey,
+                value:
+                  typeof ctx.raw === "number" ? ctx.raw : Number(ctx.raw),
+                currencyCode,
+                locale,
+              }),
+          },
         },
       },
       scales: {
@@ -131,13 +172,18 @@ export function MetricComparisonChart({
           ticks: {
             color: "#a1a1aa",
             callback: (value: number | string): string =>
-              typeof value === "number" ? formatAxisValue(value) : String(value),
+              formatAxisTick({
+                metricKey,
+                value,
+                currencyCode,
+                locale,
+              }),
             font: { size: 11 },
           },
         },
       },
     }),
-    []
+    [metricKey, granularity, currencyCode, locale]
   );
 
   return (

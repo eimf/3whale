@@ -19,7 +19,7 @@ const worker = new Worker(
   async (job) => {
     if (job.name === "syncOrdersIncomeV1") {
       logger.info({ jobId: job.id }, "Starting syncOrdersIncomeV1");
-      const result = await syncOrdersIncomeV1();
+      const result = await syncOrdersIncomeV1(job.data);
       logger.info({ jobId: job.id, ...result }, "Finished syncOrdersIncomeV1");
       return result;
     }

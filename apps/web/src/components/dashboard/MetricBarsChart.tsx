@@ -10,6 +10,12 @@ import {
   Tooltip,
 } from "chart.js";
 import { Chart as ChartJS } from "chart.js";
+import type { DashboardMetricKey } from "@/types/metrics";
+import {
+  formatTooltipTitle,
+  formatMetricValue,
+  formatAxisTick,
+} from "@/lib/formatMetric";
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Legend, Tooltip);
 
@@ -24,21 +30,25 @@ interface MetricBarsChartProps {
   series: BarSeriesPoint[];
   /** Dataset label for legend */
   label?: string;
-}
-
-/** Format Y-axis as compact numbers (e.g. 30K, 60K) for readability. */
-function formatAxisValue(value: number): string {
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
-  if (value >= 1_000) return `${(value / 1_000).toFixed(0)}K`;
-  return String(value);
+  metricKey: DashboardMetricKey;
+  granularity: "hour" | "day";
+  currencyCode: string;
+  locale?: string;
 }
 
 /**
  * Renders a Chart.js bar chart only when real series data exists and has length > 0.
  * Otherwise shows "No data yet". No mock data, no empty chart with fake zeros.
- * Styled with blue-to-emerald gradient bars and compact Y-axis (K/M).
+ * Styled with blue-to-emerald gradient bars; Y-axis and tooltips use formatMetric.
  */
-export function MetricBarsChart({ series, label = "Value" }: MetricBarsChartProps) {
+export function MetricBarsChart({
+  series,
+  label = "Value",
+  metricKey,
+  granularity,
+  currencyCode,
+  locale = "en",
+}: MetricBarsChartProps) {
   const chartData = useMemo(() => {
     if (!series || series.length === 0) return null;
     return {
@@ -47,7 +57,9 @@ export function MetricBarsChart({ series, label = "Value" }: MetricBarsChartProp
         {
           label,
           data: series.map((p) => p.y),
-          backgroundColor: (ctx: { chart: { ctx: CanvasRenderingContext2D; height: number } }) => {
+          backgroundColor: (ctx: {
+            chart: { ctx: CanvasRenderingContext2D; height: number };
+          }) => {
             const { chart } = ctx;
             const g = chart.ctx.createLinearGradient(0, 0, 0, chart.height);
             g.addColorStop(0, "rgba(52, 211, 153, 0.9)");
@@ -67,13 +79,34 @@ export function MetricBarsChart({ series, label = "Value" }: MetricBarsChartProp
       responsive: true,
       maintainAspectRatio: true,
       plugins: {
-        legend: { display: true, labels: { color: "#a1a1aa", font: { size: 12 } } },
+        legend: {
+          display: true,
+          labels: { color: "#a1a1aa", font: { size: 12 } },
+        },
         tooltip: {
           backgroundColor: "rgb(39, 39, 42)",
           titleColor: "#e4e4e7",
           bodyColor: "#a1a1aa",
           borderColor: "rgba(255,255,255,0.1)",
           borderWidth: 1,
+          callbacks: {
+            title: (items: { label: string }[]) =>
+              items.length > 0
+                ? formatTooltipTitle({
+                    label: items[0].label,
+                    granularity,
+                    locale,
+                  })
+                : "",
+            label: (ctx: { raw: unknown }) =>
+              formatMetricValue({
+                metricKey,
+                value:
+                  typeof ctx.raw === "number" ? ctx.raw : Number(ctx.raw),
+                currencyCode,
+                locale,
+              }),
+          },
         },
       },
       scales: {
@@ -86,13 +119,18 @@ export function MetricBarsChart({ series, label = "Value" }: MetricBarsChartProp
           ticks: {
             color: "#a1a1aa",
             callback: (value: number | string): string =>
-              typeof value === "number" ? formatAxisValue(value) : String(value),
+              formatAxisTick({
+                metricKey,
+                value,
+                currencyCode,
+                locale,
+              }),
             font: { size: 11 },
           },
         },
       },
     }),
-    []
+    [metricKey, granularity, currencyCode, locale]
   );
 
   if (!series || series.length === 0) {

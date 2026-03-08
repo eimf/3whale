@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { toMoneyValue } from "../moneyValue";
+import { toMoneyValue, roundToDecimalsHalfEven } from "../moneyValue";
 
 describe("toMoneyValue", () => {
   it("1.005000 -> display 1.00 (half-even: round to even)", () => {
@@ -59,5 +59,25 @@ describe("toMoneyValue", () => {
     const v = toMoneyValue("not a number");
     expect(v.raw).toBe("0.000000");
     expect(v.display).toBe("0.00");
+  });
+});
+
+describe("roundToDecimalsHalfEven", () => {
+  it("rounds to 6 decimals half-even (True AOV)", () => {
+    expect(roundToDecimalsHalfEven("2.125", 6)).toBe("2.125000");
+    // 2.1250005 at 6 dp: tie at 0 (even) -> round to 2.125000
+    expect(roundToDecimalsHalfEven("2.1250005", 6)).toBe("2.125000");
+    expect(roundToDecimalsHalfEven("2.1250015", 6)).toBe("2.125002");
+    expect(roundToDecimalsHalfEven("2.1250005", 2)).toBe("2.13");
+  });
+
+  it("half-even: 1.005 -> 1.00, 2.005 -> 2.00", () => {
+    expect(roundToDecimalsHalfEven("1.005", 2)).toBe("1.00");
+    expect(roundToDecimalsHalfEven("2.005", 2)).toBe("2.00");
+  });
+
+  it("zero decimals", () => {
+    expect(roundToDecimalsHalfEven("1.5", 0)).toBe("2");
+    expect(roundToDecimalsHalfEven("2.5", 0)).toBe("2");
   });
 });

@@ -7,6 +7,10 @@
 #   taxAmount              <- currentTotalTaxSet.shopMoney       (reported component; excluded from income)
 #   discountAmount         <- currentTotalDiscountsSet.shopMoney (breakdown/reconciliation only; do not subtract again)
 #   refund.amount         <- refund.totalRefundedSet.shopMoney
+#   shipping_total        <- totalShippingPriceSet.shopMoney (gross order shipping)
+#   tax_total             <- totalTaxSet.shopMoney (gross order tax)
+#   units_sold            <- sum(lineItems[].quantity)
+#   is_new_customer       <- customer.numberOfOrders == 1
 
 query OrdersForIncomeV1($first: Int!, $after: String, $query: String) {
     orders(first: $first, after: $after, query: $query, sortKey: PROCESSED_AT) {
@@ -28,6 +32,17 @@ query OrdersForIncomeV1($first: Int!, $after: String, $query: String) {
             app {
                 id
                 name
+            }
+            customer {
+                id
+                numberOfOrders
+            }
+            lineItems(first: 250) {
+                edges {
+                    node {
+                        quantity
+                    }
+                }
             }
             currentSubtotalPriceSet {
                 shopMoney {

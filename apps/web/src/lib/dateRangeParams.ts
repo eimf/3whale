@@ -46,6 +46,51 @@ export function getLastMonthInTz(timezone: string): {
     };
 }
 
+/** Format an arbitrary Date as YYYY-MM-DD in the given IANA timezone. */
+export function formatDateInTz(date: Date, timezone: string): string {
+    return new Intl.DateTimeFormat("en-CA", {
+        timeZone: timezone,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+    }).format(date);
+}
+
+/** Get the from/to date range (YYYY-MM-DD) for a preset in the given timezone. Used to highlight the calendar. */
+export function getPresetRangeInTz(
+    preset: RangePreset,
+    timezone: string,
+): { from: string; to: string } {
+    const tz = timezone || "America/Mexico_City";
+    switch (preset) {
+        case "today": {
+            const today = getTodayInTz(tz);
+            return { from: today, to: today };
+        }
+        case "yesterday": {
+            const yesterday = getYesterdayInTz(tz);
+            return { from: yesterday, to: yesterday };
+        }
+        case "last7":
+        case "last14":
+        case "last30":
+        case "last90":
+        case "last365": {
+            const days = preset === "last7" ? 7 : preset === "last14" ? 14 : preset === "last30" ? 30 : preset === "last90" ? 90 : 365;
+            const to = getTodayInTz(tz);
+            const fromDate = new Date(Date.now() - (days - 1) * 24 * 60 * 60 * 1000);
+            const from = formatDateInTz(fromDate, tz);
+            return { from, to };
+        }
+        case "lastMonth": {
+            return getLastMonthInTz(tz);
+        }
+        default:
+            const today = getTodayInTz(tz);
+            return { from: today, to: today };
+    }
+}
+
 export function getRangeApiParams(
     rangePreset: RangePreset | null,
     rangeCustom: { from: string; to: string } | null,

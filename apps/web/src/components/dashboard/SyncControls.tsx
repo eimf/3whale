@@ -1,6 +1,16 @@
 "use client";
 
+import { useState } from "react";
 import { useTranslations } from "next-intl";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogClose,
+  DialogPortal,
+  DialogOverlay,
+} from "@/components/ui/dialog";
 
 function RefreshIcon() {
   return (
@@ -29,7 +39,7 @@ export interface SyncControlsProps {
   syncing: boolean;
   syncMessage: string | null;
   syncError: string | null;
-  onRefresh: () => void;
+  onRefresh: (fullSync?: boolean) => void;
 }
 
 export function SyncControls({
@@ -40,13 +50,23 @@ export function SyncControls({
   onRefresh,
 }: SyncControlsProps) {
   const t = useTranslations();
+  const [showFullSyncModal, setShowFullSyncModal] = useState(false);
 
-  function handleRefreshClick() {
+  function handleRefreshClick(fullSync?: boolean) {
     if (process.env.NODE_ENV === "development") {
       // eslint-disable-next-line no-console
-      console.log("[SyncControls] refresh clicked:", syncing ? "sync already in progress" : "starting sync / refetch status");
+      console.log("[SyncControls] refresh clicked:", fullSync ? "full sync" : "incremental", syncing ? "sync already in progress" : "starting");
     }
-    onRefresh();
+    if (fullSync) {
+      setShowFullSyncModal(true);
+      return;
+    }
+    onRefresh(false);
+  }
+
+  function handleConfirmFullSync() {
+    setShowFullSyncModal(false);
+    onRefresh(true);
   }
 
   return (
@@ -55,19 +75,31 @@ export function SyncControls({
         <span className="text-zinc-500 shrink-0">
           {t("sync.lastSynced")}: <span className="text-zinc-400">{lastSyncLabel}</span>
         </span>
-        <button
-          type="button"
-          onClick={handleRefreshClick}
-          disabled={syncing}
-          aria-busy={syncing}
-          aria-label={syncing ? t("sync.syncing") : t("sync.syncNow")}
-          className="shrink-0 rounded-lg border border-zinc-600 bg-zinc-800 p-2 text-zinc-300 hover:bg-zinc-700 hover:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed"
-          title={syncing ? t("sync.syncing") : t("sync.syncNow")}
-        >
-          <span className={`inline-block ${syncing ? "animate-spin" : ""}`}>
-            <RefreshIcon />
-          </span>
-        </button>
+        <div className="flex items-center gap-1 shrink-0">
+          <button
+            type="button"
+            onClick={() => handleRefreshClick(false)}
+            disabled={syncing}
+            aria-busy={syncing}
+            aria-label={syncing ? t("sync.syncing") : t("sync.syncNow")}
+            className="rounded-lg border border-zinc-600 bg-zinc-800 p-2 text-zinc-300 hover:bg-zinc-700 hover:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed"
+            title={syncing ? t("sync.syncing") : t("sync.syncNow")}
+          >
+            <span className={`inline-block ${syncing ? "animate-spin" : ""}`}>
+              <RefreshIcon />
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => handleRefreshClick(true)}
+            disabled={syncing}
+            aria-label={t("sync.fullSync")}
+            title={t("sync.fullSyncTitle")}
+            className="rounded-lg border border-zinc-600 bg-zinc-800 px-2.5 py-2 text-xs text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {t("sync.fullSync")}
+          </button>
+        </div>
       </div>
       {/* Progress bar: visible while syncing */}
       {syncing && (
@@ -89,6 +121,54 @@ export function SyncControls({
           {syncError ?? syncMessage}
         </span>
       )}
+
+      {/* Full sync confirmation modal */}
+      <Dialog open={showFullSyncModal} onOpenChange={setShowFullSyncModal}>
+        <DialogPortal>
+          <DialogOverlay />
+          <DialogContent className="max-w-md gap-5">
+            <DialogHeader>
+              <DialogTitle>{t("sync.fullSyncModal.title")}</DialogTitle>
+            </DialogHeader>
+            <div className="grid gap-4 text-sm text-zinc-300">
+              <div>
+                <p className="font-medium text-zinc-200 mb-1.5">{t("sync.fullSyncModal.whatItDoes")}</p>
+                <ul className="list-disc list-inside space-y-1 text-zinc-400">
+                  <li>{t("sync.fullSyncModal.whatItDoesBullet1")}</li>
+                  <li>{t("sync.fullSyncModal.whatItDoesBullet2")}</li>
+                  <li>{t("sync.fullSyncModal.whatItDoesBullet3")}</li>
+                </ul>
+              </div>
+              <div>
+                <p className="font-medium text-zinc-200 mb-1.5">{t("sync.fullSyncModal.whatToExpect")}</p>
+                <ul className="list-disc list-inside space-y-1 text-zinc-400">
+                  <li>{t("sync.fullSyncModal.whatToExpectBullet1")}</li>
+                  <li>{t("sync.fullSyncModal.whatToExpectBullet2")}</li>
+                  <li>{t("sync.fullSyncModal.whatToExpectBullet3")}</li>
+                </ul>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2">
+              <DialogClose asChild>
+                <button
+                  type="button"
+                  className="rounded-lg border border-zinc-600 bg-zinc-800 px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-700 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                >
+                  {t("sync.fullSyncModal.cancel")}
+                </button>
+              </DialogClose>
+              <button
+                type="button"
+                onClick={handleConfirmFullSync}
+                disabled={syncing}
+                className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-50"
+              >
+                {t("sync.fullSyncModal.confirm")}
+              </button>
+            </div>
+          </DialogContent>
+        </DialogPortal>
+      </Dialog>
     </div>
   );
 }
