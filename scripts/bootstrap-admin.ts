@@ -3,7 +3,7 @@
  * Reads ADMIN_EMAIL and ADMIN_PASSWORD from env; hashes password with argon2id.
  *
  * Usage (from repo root):
- *   ADMIN_EMAIL=lzdzel@gmail.com ADMIN_PASSWORD='3Whale7!!1' pnpm run bootstrap:admin
+ *   ADMIN_EMAIL=admin@example.com ADMIN_PASSWORD='YourSecurePass1!' pnpm run bootstrap:admin
  * Or set in .env and run: pnpm run bootstrap:admin
  *
  * Password rules (enforced): min 8, max 15; >=1 uppercase; >=1 number; >=1 special; no spaces.
@@ -70,13 +70,13 @@ async function main() {
          updated_at = now()`,
       [normalizedEmail, passwordHash]
     );
-    console.log("Admin user created or updated for email:", normalizedEmail);
+    console.log("Admin user created or updated.");
   } finally {
     await pool.end();
   }
 }
 
-main().catch((err) => {
-  console.error("Bootstrap failed:", err);
+main().catch((err: unknown) => {
+  console.error("Bootstrap failed:", err instanceof Error ? err.message : "Unknown error");
   process.exit(1);
 });
