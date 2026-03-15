@@ -8,6 +8,7 @@
     "test:watch": "vitest",
     "dev:api": "tsx src/api/index.ts",
     "dev:worker": "tsx src/jobs/worker.ts",
+    "start": "pnpm run start:api",
     "start:api": "tsx src/api/index.ts",
     "start:worker": "tsx src/jobs/worker.ts",
     "db:migrate": "tsx src/db/migrate.ts",
