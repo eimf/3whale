@@ -1,25 +1,26 @@
-import Link from "next/link";
+import { Navbar } from "@/components/landing/layout/Navbar";
+import { Footer } from "@/components/landing/layout/Footer";
+import { Hero } from "@/components/landing/sections/Hero";
+import { SocialProof } from "@/components/landing/sections/SocialProof";
+import { MetricsGrid } from "@/components/landing/sections/MetricsGrid";
+import { FeatureSections } from "@/components/landing/sections/FeatureSections";
+import { Integrations } from "@/components/landing/sections/Integrations";
+import { BottomCTA } from "@/components/landing/sections/BottomCTA";
 
 export default function LandingPage() {
   return (
-    <div className="flex flex-1 flex-col items-center justify-center px-4 py-16">
-      <div className="w-full max-w-lg space-y-6 text-center">
-        <h1 className="text-2xl font-semibold text-zinc-100 sm:text-3xl">
-          3whale
-        </h1>
-        <p className="text-zinc-400">
-          3whale is a Shopify metrics sync + dashboard tool for tracking income,
-          orders, and key store metrics.
-        </p>
-        <div>
-          <Link
-            href="/login"
-            className="inline-flex items-center justify-center rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-zinc-950"
-          >
-            Login
-          </Link>
-        </div>
-      </div>
+    <div className="min-h-screen bg-base-900">
+      <div className="noise-overlay" aria-hidden />
+      <Navbar />
+      <main>
+        <Hero />
+        <SocialProof />
+        <MetricsGrid />
+        <FeatureSections />
+        <Integrations />
+        <BottomCTA />
+      </main>
+      <Footer />
     </div>
   );
 }
