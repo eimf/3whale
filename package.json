@@ -8,7 +8,10 @@
     "test:watch": "vitest",
     "dev:api": "tsx src/api/index.ts",
     "dev:worker": "tsx src/jobs/worker.ts",
+    "start:api": "tsx src/api/index.ts",
+    "start:worker": "tsx src/jobs/worker.ts",
     "db:migrate": "tsx src/db/migrate.ts",
+    "bootstrap:admin": "tsx scripts/bootstrap-admin.ts",
     "debug:today": "tsx scripts/debug-today-income.ts",
     "print-summary": "tsx scripts/print-summary.ts",
     "diagnose:orders": "tsx scripts/diagnose-order-counts.ts"
@@ -20,6 +23,7 @@
     "vitest": "^2.1.0"
   },
   "dependencies": {
+    "argon2": "^0.41.0",
     "bullmq": "^5.34.0",
     "decimal.js": "^10.4.3",
     "dotenv": "^17.3.1",

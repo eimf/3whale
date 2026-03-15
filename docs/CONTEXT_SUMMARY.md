@@ -66,19 +66,19 @@ Target parity with Shopify Analytics (orders by `processed_at`, financials from 
 docker compose up -d
 
 # Migrations
-npm run db:migrate
+pnpm run db:migrate
 
 # API (port 3000)
-npm run dev:api
+pnpm run dev:api
 
 # Worker (BullMQ, shopify-sync)
-npm run dev:worker
+pnpm run dev:worker
 
 # Print 8 metrics to terminal (e.g. 2026-02-28)
-npm run print-summary -- --from 2026-02-28 --to 2026-02-28
+pnpm run print-summary -- --from 2026-02-28 --to 2026-02-28
 ```
 
-- **Web dashboard**: `apps/web` — set `INTERNAL_API_BASE_URL` and `INTERNAL_API_KEY` in `.env.local`, then `npm run dev` (port 3001).
+- **Web dashboard**: `apps/web` — set `INTERNAL_API_BASE_URL` and `INTERNAL_API_KEY` in `.env.local`, then `pnpm run dev` (port 3001).
 
 ---
 

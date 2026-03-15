@@ -3,7 +3,6 @@ import { NextIntlClientProvider } from "next-intl";
 import { getLocale, getMessages } from "next-intl/server";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Providers } from "./providers";
-import { AppShell } from "@/components/layout/AppShell";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -34,7 +33,7 @@ export default async function RootLayout({
       >
         <NextIntlClientProvider messages={messages}>
           <Providers>
-            <AppShell currentLocale={locale}>{children}</AppShell>
+            {children}
           </Providers>
         </NextIntlClientProvider>
       </body>

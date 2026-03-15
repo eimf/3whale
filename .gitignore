@@ -28,3 +28,4 @@ coverage/
 
 # Misc
 *.local
+_login/

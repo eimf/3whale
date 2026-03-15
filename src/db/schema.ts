@@ -157,3 +157,12 @@ export const syncRunLog = pgTable("sync_run_log", {
     lastCursor: text("last_cursor"),
     error: text("error"),
 });
+
+/** Single admin user for web app login (BFF auth). */
+export const adminUser = pgTable("admin_user", {
+    id: uuid("id").primaryKey().defaultRandom(),
+    email: text("email").notNull().unique(),
+    passwordHash: text("password_hash").notNull(),
+    createdAt: timestamptz("created_at").notNull().defaultNow(),
+    updatedAt: timestamptz("updated_at").notNull().defaultNow(),
+});

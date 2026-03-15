@@ -140,8 +140,8 @@ export function RangeSelectorPopover({
   const [open, setOpen] = useState(false);
   const [presetListOpen, setPresetListOpen] = useState(false);
   const [pendingPreset, setPendingPreset] = useState<RangePresetType | null>(rangePreset);
-  const [pendingFrom, setPendingFrom] = useState<string>(rangeCustom?.from ?? getTodayInTz(timezoneIana));
-  const [pendingTo, setPendingTo] = useState<string>(rangeCustom?.to ?? getTodayInTz(timezoneIana));
+  const [pendingFrom, setPendingFrom] = useState<string | null>(rangeCustom?.from ?? getTodayInTz(timezoneIana));
+  const [pendingTo, setPendingTo] = useState<string | null>(rangeCustom?.to ?? getTodayInTz(timezoneIana));
   const [focusMonth, setFocusMonth] = useState(() => {
     const d = new Date();
     return { year: d.getFullYear(), month: d.getMonth() };

@@ -1,6 +1,6 @@
 /**
  * Run migrations from drizzle/*.sql (plain SQL; no journal required).
- * Usage: npx tsx src/db/migrate.ts
+ * Usage: pnpm run db:migrate (or: tsx src/db/migrate.ts)
  * Loads env from .env; see src/env.ts for required keys.
  */
 import "dotenv/config";
