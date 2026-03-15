@@ -1,0 +1,11 @@
+# Railway/Nixpacks build config — repo root is the API/worker service.
+# Use service Variables to override start for the worker: NIXPACKS_START_CMD="pnpm run start:worker"
+
+[phases.setup]
+nixPkgs = ["nodejs_20", "corepack"]
+
+[phases.install]
+cmds = ["corepack enable", "pnpm install"]
+
+[start]
+cmd = "pnpm run start:api"

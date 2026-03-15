@@ -2,35 +2,80 @@
 
 Prepare and deploy the API, worker, and web app. Use this checklist for production or staging.
 
+**Chosen stack:** client on **Vercel**, backend (API + Worker) and database on **Railway**.
+
 ---
 
 ## Overview
 
-| Component | Role | Typical host |
-|-----------|------|---------------|
-| **Postgres** | Database (sync + admin_user) | Managed DB (Neon, Supabase, RDS) or Docker |
-| **Redis** | BullMQ job queue | Managed Redis (Upstash, Redis Cloud) or Docker |
-| **API** | Fastify internal API (port 3000) | Railway, Render, Fly.io, or same host as worker |
-| **Worker** | BullMQ worker (sync jobs) | Same host as API or separate process |
-| **Web** | Next.js BFF + UI (port 3001) | Vercel or Node server |
+| Component | Role | Host |
+|-----------|------|------|
+| **Postgres** | Database (sync + admin_user) | Railway (Postgres plugin) |
+| **Redis** | BullMQ job queue | Railway (Redis plugin) |
+| **API** | Fastify internal API (port 3000) | Railway service |
+| **Worker** | BullMQ worker (sync jobs) | Railway service |
+| **Web** | Next.js BFF + UI | Vercel |
 
-The web app talks to the API via server-side env `INTERNAL_API_BASE_URL` and `INTERNAL_API_KEY`. The web app also needs **direct Postgres** (`DATABASE_URL`) for admin login.
+The web app talks to the API via server-side env `INTERNAL_API_BASE_URL` and `INTERNAL_API_KEY`. The web app also needs **direct Postgres** (`DATABASE_URL`) for admin login — use the same Railway Postgres URL in Vercel.
 
 ---
 
-## 1. Infrastructure
+## 1. Railway (backend + DB)
 
-- [ ] **Postgres** – Create a database; note `DATABASE_URL` (same URL for API, worker, and web app auth).
-- [ ] **Redis** – Create instance; note `REDIS_URL`.
-- [ ] Ensure both are reachable from your API/worker host and from Vercel (or wherever the web app runs) for Postgres.
+Create a Railway project and add the following. All services use the **repo root** as root directory (monorepo).
+
+### 1.1 Postgres and Redis
+
+- [ ] In the project, click **+ New** → **Database** → **PostgreSQL**. Railway sets `DATABASE_URL` automatically when you link the service.
+- [ ] **+ New** → **Database** → **Redis**. Railway sets `REDIS_URL` when linked.
+
+### 1.2 API service
+
+- [ ] **+ New** → **GitHub Repo** (or deploy from CLI), select this repo.
+- [ ] **Settings** → **Root Directory**: leave empty (repo root).
+- [ ] **Settings** → **Build Command**: `pnpm install` (or leave default if Nixpacks runs it).
+- [ ] **Settings** → **Start Command**: `pnpm run start:api`
+- [ ] **Settings** → **Variables**: Link Postgres and Redis so `DATABASE_URL` and `REDIS_URL` are set. Add the rest (see [Backend env vars](#2-backend-api--worker)).
+- [ ] **Settings** → Generate a **public domain** for the service (e.g. `your-api.up.railway.app`) and use this URL as `INTERNAL_API_BASE_URL` in Vercel.
+
+### 1.3 Worker service
+
+- [ ] **+ New** → **Empty Service** (or **Clone** from the API service).
+- [ ] **Settings** → Connect the **same GitHub repo** and branch; root directory = repo root.
+- [ ] **Settings** → **Start Command**: `pnpm run start:worker`
+- [ ] **Settings** → **Variables**: Same as API (link Postgres + Redis, add Shopify and `INTERNAL_API_KEY`). Worker does not need `PORT`.
+
+### 1.4 Migrations and admin (once per DB)
+
+From your machine with Railway CLI, or in a one-off shell in the API service:
+
+```bash
+# From repo root; DATABASE_URL comes from Railway env
+pnpm run db:migrate
+ADMIN_EMAIL=admin@yourcompany.com ADMIN_PASSWORD='YourSecurePass1!' pnpm run bootstrap:admin
+```
+
+Or use **Railway CLI**: `railway run pnpm run db:migrate`, then bootstrap.
+
+### 1.5 Health check
+
+- [ ] Open `https://<your-api-domain>/internal/health` → expect 200.
 
 ---
 
 ## 2. Backend (API + Worker)
 
+### If not using Railway Postgres/Redis
+
+If you use external Postgres/Redis instead of Railway’s plugins:
+
+- [ ] **Postgres** – Create a database; note `DATABASE_URL` (same URL for API, worker, and web app auth).
+- [ ] **Redis** – Create instance; note `REDIS_URL`.
+- [ ] Ensure both are reachable from Railway and from Vercel (for Postgres only).
+
 ### Env vars (backend)
 
-Set these where the API and worker run (e.g. Railway/Render dashboard or `.env`):
+Set these on both Railway API and Worker services (and in Vercel for the web vars listed in §3). On Railway, link Postgres/Redis for `DATABASE_URL` / `REDIS_URL`, then add the rest:
 
 | Variable | Required | Description |
 |----------|----------|-------------|
@@ -88,9 +133,13 @@ On many hosts you configure two services: one run command `pnpm run start:api`, 
 
 ---
 
-## 3. Web app (Next.js)
+## 3. Vercel (web app)
+
+Deploy the Next.js app to Vercel. Set **INTERNAL_API_BASE_URL** to your Railway API public URL (e.g. `https://your-api.up.railway.app`).
 
 ### Build
+
+From repo root or with Vercel root set to `apps/web`:
 
 ```bash
 cd apps/web
@@ -100,7 +149,7 @@ pnpm run build
 
 ### Env vars (web app)
 
-Set in Vercel (or your host) **Environment Variables**:
+Set in the Vercel project **Environment Variables**:
 
 | Variable | Required | Description |
 |----------|----------|-------------|
@@ -121,17 +170,18 @@ Runs Next.js on port 3001 (or `PORT` if set). For Vercel, the platform runs the 
 
 ### Vercel-specific
 
-- **Root directory**: Set to `apps/web` (or deploy from a monorepo with root set to this app).
-- **Build command**: `pnpm run build` (or `pnpm install && pnpm run build` if needed).
+- **Root directory**: Set to `apps/web` (Vercel monorepo support).
+- **Build command**: `pnpm run build` (or `pnpm install && pnpm run build` if root is `apps/web`).
 - **Output**: Standard Next.js; no extra config unless you use a custom output (e.g. `output: 'standalone'`).
+- **DATABASE_URL**: Use the same Postgres URL as Railway (from the Railway Postgres plugin; copy from Railway dashboard if needed).
 - Ensure all four env vars above are set for the production environment.
 
 ---
 
 ## 4. Post-deploy checks
 
-- [ ] **API**: Open `https://your-api-host/internal/health` → expect 200.
-- [ ] **Web**: Open `https://your-web-host` → landing page loads.
+- [ ] **API**: Open `https://<railway-api-domain>/internal/health` → expect 200.
+- [ ] **Web**: Open your Vercel URL → landing page loads.
 - [ ] **Login**: Click Login → sign in with the bootstrap admin email/password → redirect to dashboard.
 - [ ] **Dashboard**: Dashboard loads; sync controls and metrics call the API (BFF uses `INTERNAL_API_BASE_URL` + `INTERNAL_API_KEY`).
 - [ ] **Logout**: Logout clears cookie and redirects to `/login`.
