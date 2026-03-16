@@ -86,9 +86,7 @@ Set these on both Railway API and Worker services (and in Vercel for the web var
 | `PORT` | No | Default 3000 for API. |
 | `SHOPIFY_SHOP_DOMAIN` | Yes | e.g. `store.myshopify.com`. |
 | `SHOPIFY_ADMIN_ACCESS_TOKEN` | Yes | `shpat_...` from Shopify. |
-| `SHOP_TIMEZONE_IANA` | Yes | e.g. `America/Mexico_City`. |
-| `SHOP_CURRENCY_CODE` | Yes | e.g. `MXN`. |
-| `SHOPIFY_API_VERSION` | No | Default 2025-04. |
+| `SHOPIFY_API_VERSION` | No | Default 2025-04. (Used for bootstrap shop fetch and sync.) |
 | `SHOPIFY_SYNC_PAGE_SIZE` | No | Default 100. |
 | `SHOPIFY_SYNC_OVERLAP_DAYS` | No | Default 2. |
 | `SHOPIFY_INITIAL_BACKFILL_DAYS` | No | Default 30. |

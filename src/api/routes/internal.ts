@@ -21,6 +21,7 @@ import {
     getSyncQueue,
     JOB_NAME_SYNC_ORDERS_INCOME_V1,
 } from "../../jobs/queues.js";
+import { fetchShopConfigFromShopify } from "../../shopify/client/fetchShopConfig.js";
 import { toMoneyValue, roundToDecimalsHalfEven } from "../../metrics/moneyValue.js";
 import {
     listOrders,
@@ -100,14 +101,29 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
         return reply.send({ ok: true });
     });
 
-    /** Insert/update shop_config from env; create sync_state if not exists. */
+    /** Insert/update shop_config from Shopify API (timezone, currency) + env (domain); create sync_state if not exists. */
     fastify.post("/internal/bootstrap", async (_req, reply) => {
-        const shopDomain = process.env.SHOPIFY_SHOP_DOMAIN;
-        const timezoneIana = process.env.SHOP_TIMEZONE_IANA;
-        const currencyCode = process.env.SHOP_CURRENCY_CODE;
-        if (!shopDomain || !timezoneIana || !currencyCode) {
+        const shopDomain = process.env.SHOPIFY_SHOP_DOMAIN?.trim();
+        const accessToken = process.env.SHOPIFY_ADMIN_ACCESS_TOKEN?.trim();
+        if (!shopDomain || !accessToken) {
             return reply.code(400).send({
-                error: "Missing env: SHOPIFY_SHOP_DOMAIN, SHOP_TIMEZONE_IANA, SHOP_CURRENCY_CODE",
+                error: "Missing env: SHOPIFY_SHOP_DOMAIN, SHOPIFY_ADMIN_ACCESS_TOKEN",
+            });
+        }
+        let timezoneIana: string;
+        let currencyCode: string;
+        try {
+            const shopConfigFromShopify = await fetchShopConfigFromShopify({
+                shopDomain,
+                accessToken,
+            });
+            timezoneIana = shopConfigFromShopify.ianaTimezone;
+            currencyCode = shopConfigFromShopify.currencyCode;
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            return reply.code(502).send({
+                error: "Failed to fetch shop config from Shopify API",
+                details: message,
             });
         }
         const now = new Date();
@@ -985,6 +1001,19 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
                       )
                     : "0.000000";
 
+            const allOrdersProductRevenue = new Decimal(s.incomeNeto)
+                .minus(s.shippingAmount)
+                .toString();
+            const averageOrderValueStr =
+                s.ordersIncluded > 0
+                    ? roundToDecimalsHalfEven(
+                          new Decimal(allOrdersProductRevenue)
+                              .div(s.ordersIncluded)
+                              .toString(),
+                          6,
+                      )
+                    : "0.000000";
+
             const payload: Record<string, unknown> = {
                 range: { from, to, timezone: tz },
                 currencyCode: s.currencyCode,
@@ -1042,6 +1071,7 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
                 incomeNetoProductOnly: toMoneyValue(s.incomeNetoProductOnly),
                 ordersWithPositiveRevenue: s.ordersWithPositiveRevenue,
                 aovNeto: toMoneyValue(aovNetoStr),
+                averageOrderValueAmount: toMoneyValue(averageOrderValueStr),
                 shopifyParityModel: ACTIVE_SHOPIFY_PARITY_MODEL,
                 ordersCountParity: parityCurrentResult.ordersCreatedInRange,
                 shopifyParity: toShopifyParityMoneyValues(
@@ -1173,6 +1203,17 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
                         incomeNetoProductOnly: toMoneyValue(sp.incomeNetoProductOnly),
                         ordersWithPositiveRevenue: sp.ordersWithPositiveRevenue,
                         aovNeto: toMoneyValue(aovPrevStr),
+                        averageOrderValueAmount: toMoneyValue(
+                            sp.ordersIncluded > 0
+                                ? roundToDecimalsHalfEven(
+                                      new Decimal(sp.incomeNeto)
+                                          .minus(sp.shippingAmount)
+                                          .div(sp.ordersIncluded)
+                                          .toString(),
+                                      6,
+                                  )
+                                : "0.000000",
+                        ),
                         shopifyParity: toShopifyParityMoneyValues(parityPrev),
                     };
 
@@ -1274,6 +1315,18 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
                             sp.ordersIncluded,
                         ),
                         aovNeto: computeDeltaPercent(aovNetoStr, aovPrevStr),
+                        averageOrderValue: computeDeltaPercent(
+                            averageOrderValueStr,
+                            sp.ordersIncluded > 0
+                                ? roundToDecimalsHalfEven(
+                                      new Decimal(sp.incomeNeto)
+                                          .minus(sp.shippingAmount)
+                                          .div(sp.ordersIncluded)
+                                          .toString(),
+                                      6,
+                                  )
+                                : "0.000000",
+                        ),
                         shopifyParity: {
                             grossSales: computeDeltaPercent(
                                 parityCurrent.grossSales,

@@ -74,6 +74,8 @@ export type SummaryV2 = {
     /** True AOV denominator: count of orders with income_neto > 0 */
     ordersWithPositiveRevenue?: number;
     aovNeto: MoneyValue;
+    /** Average Order Value including $0 orders: (product revenue all orders) / total orders */
+    averageOrderValueAmount?: MoneyValue;
     shopifyParityModel?: ShopifyParityModel;
     shopifyParity?: ShopifyParityMetrics;
     comparison?: SummaryV2Comparison | null;
@@ -107,6 +109,7 @@ export type SummaryV2Comparison = {
     discountAmount: MoneyValue;
     ordersIncluded: number;
     aovNeto: MoneyValue;
+    averageOrderValueAmount?: MoneyValue;
     incomeNetoProductOnly?: MoneyValue;
     ordersWithPositiveRevenue?: number;
     shopifyParity?: ShopifyParityMetrics;
@@ -143,6 +146,7 @@ export type SummaryV2Deltas = {
     discountAmount: DeltaItem;
     ordersIncluded: DeltaItem;
     aovNeto: DeltaItem;
+    averageOrderValue?: DeltaItem;
     shopifyParity?: {
         grossSales: DeltaItem;
         discounts: DeltaItem;

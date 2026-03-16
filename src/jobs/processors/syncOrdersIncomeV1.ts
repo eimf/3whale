@@ -216,7 +216,7 @@ export async function syncOrdersIncomeV1(
                     }
 
                     const orderWithExtras = orderNode as {
-                        customer?: { id?: string; numberOfOrders?: number };
+                        customer?: { id?: string; numberOfOrders?: string | number };
                         lineItems?: {
                             edges?: Array<{ node?: { quantity?: number } }>;
                         };
@@ -226,11 +226,15 @@ export async function syncOrdersIncomeV1(
                         totalTaxSet?: { shopMoney?: { amount?: string } };
                     };
                     const customerId = orderWithExtras.customer?.id ?? null;
-                    const numberOfOrders =
+                    const rawNumberOfOrders =
                         orderWithExtras.customer?.numberOfOrders;
+                    const numberOfOrders =
+                        rawNumberOfOrders != null
+                            ? Number(rawNumberOfOrders)
+                            : undefined;
                     const isNewCustomer =
                         numberOfOrders !== undefined &&
-                        numberOfOrders !== null
+                        !Number.isNaN(numberOfOrders)
                             ? numberOfOrders === 1
                             : false;
                     const lineItemsEdges =

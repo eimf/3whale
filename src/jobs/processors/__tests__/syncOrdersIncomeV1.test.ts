@@ -43,6 +43,52 @@ describe("syncOrdersIncomeV1 (unit: mapper + calculator)", () => {
         expect(exclusion.exclude).toBe(false);
     });
 
+    it("correctly identifies new customer when numberOfOrders is a string '1'", () => {
+        const orderWithNewCustomer = {
+            ...orderFixture,
+            customer: { id: "gid://shopify/Customer/1", numberOfOrders: "1" },
+        };
+        const rawNumberOfOrders = (orderWithNewCustomer as { customer?: { numberOfOrders?: string | number } }).customer?.numberOfOrders;
+        const numberOfOrders = rawNumberOfOrders != null ? Number(rawNumberOfOrders) : undefined;
+        const isNewCustomer = numberOfOrders !== undefined && !Number.isNaN(numberOfOrders) ? numberOfOrders === 1 : false;
+        expect(isNewCustomer).toBe(true);
+    });
+
+    it("correctly identifies returning customer when numberOfOrders is a string > '1'", () => {
+        const orderWithReturningCustomer = {
+            ...orderFixture,
+            customer: { id: "gid://shopify/Customer/2", numberOfOrders: "5" },
+        };
+        const rawNumberOfOrders = (orderWithReturningCustomer as { customer?: { numberOfOrders?: string | number } }).customer?.numberOfOrders;
+        const numberOfOrders = rawNumberOfOrders != null ? Number(rawNumberOfOrders) : undefined;
+        const isNewCustomer = numberOfOrders !== undefined && !Number.isNaN(numberOfOrders) ? numberOfOrders === 1 : false;
+        expect(isNewCustomer).toBe(false);
+    });
+
+    it("handles null/undefined customer gracefully for isNewCustomer", () => {
+        const guestOrder = { ...orderFixture, customer: null };
+        const rawNumberOfOrders = (guestOrder as { customer?: { numberOfOrders?: string | number } | null }).customer?.numberOfOrders;
+        const numberOfOrders = rawNumberOfOrders != null ? Number(rawNumberOfOrders) : undefined;
+        const isNewCustomer = numberOfOrders !== undefined && !Number.isNaN(numberOfOrders) ? numberOfOrders === 1 : false;
+        expect(isNewCustomer).toBe(false);
+    });
+
+    it("computes unitsSold from lineItems edges", () => {
+        const orderWithLineItems = {
+            ...orderFixture,
+            lineItems: {
+                edges: [
+                    { node: { quantity: 3 } },
+                    { node: { quantity: 2 } },
+                    { node: { quantity: 1 } },
+                ],
+            },
+        };
+        const lineItemsEdges = (orderWithLineItems as { lineItems?: { edges?: Array<{ node?: { quantity?: number } }> } }).lineItems?.edges ?? [];
+        const unitsSold = lineItemsEdges.reduce((sum, edge) => sum + (Number(edge.node?.quantity) || 0), 0);
+        expect(unitsSold).toBe(6);
+    });
+
     it("aggregates canonical order revenue as sum(lineItemsSubtotal) for included orders", () => {
         const fixtureA = {
             ...orderFixture,

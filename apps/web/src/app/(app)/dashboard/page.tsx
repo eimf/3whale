@@ -627,22 +627,35 @@ export default function DashboardPage() {
                     ? Number(parity.returns.raw)
                     : Number(summary.refunds.raw);
                 break;
-            case "taxes":
-                value = parity
-                    ? Number(parity.taxes.raw)
-                    : Number(summary.taxAmount.raw);
+            case "taxes": {
+                const parityTax = parity ? Number(parity.taxes.raw) : 0;
+                value =
+                    parityTax !== 0
+                        ? parityTax
+                        : Number(summary.taxAmount.raw);
                 break;
+            }
             case "trueAov":
-            case "averageOrderValue":
             case "aov":
                 value =
                     (summary.ordersWithPositiveRevenue ?? summary.ordersIncluded) > 0
                         ? Number(summary.aovNeto.raw)
                         : null;
                 break;
+            case "averageOrderValue":
+                value =
+                    summary.ordersIncluded > 0
+                        ? Number(
+                              summary.averageOrderValueAmount?.raw ??
+                                  summary.aovNeto.raw,
+                          )
+                        : null;
+                break;
             case "totalOrders":
-            case "ordersOverZero":
                 value = summary.ordersIncluded;
+                break;
+            case "ordersOverZero":
+                value = summary.ordersWithPositiveRevenue ?? summary.ordersIncluded;
                 break;
             case "grossSales":
                 value = parity
@@ -715,22 +728,35 @@ export default function DashboardPage() {
                     ? Number(parity.returns.raw)
                     : Number(comp.refunds.raw);
                 break;
-            case "taxes":
-                value = parity
-                    ? Number(parity.taxes.raw)
-                    : Number(comp.taxAmount.raw);
+            case "taxes": {
+                const compParityTax = parity ? Number(parity.taxes.raw) : 0;
+                value =
+                    compParityTax !== 0
+                        ? compParityTax
+                        : Number(comp.taxAmount.raw);
                 break;
+            }
             case "trueAov":
-            case "averageOrderValue":
             case "aov":
                 value =
                     (comp.ordersWithPositiveRevenue ?? comp.ordersIncluded) > 0
                         ? Number(comp.aovNeto.raw)
                         : null;
                 break;
+            case "averageOrderValue":
+                value =
+                    comp.ordersIncluded > 0
+                        ? Number(
+                              comp.averageOrderValueAmount?.raw ??
+                                  comp.aovNeto.raw,
+                          )
+                        : null;
+                break;
             case "totalOrders":
-            case "ordersOverZero":
                 value = comp.ordersIncluded;
+                break;
+            case "ordersOverZero":
+                value = comp.ordersWithPositiveRevenue ?? comp.ordersIncluded;
                 break;
             case "grossSales":
                 value = parity

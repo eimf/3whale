@@ -186,6 +186,7 @@ export const TILE_TO_DELTA_KEY: Partial<
         | "shippingAmount"
         | "discountAmount"
         | "aovNeto"
+        | "averageOrderValue"
         | "unitsSold"
         | "newCustomers"
         | "returningCustomers"
@@ -204,7 +205,7 @@ export const TILE_TO_DELTA_KEY: Partial<
     shippingCost: "shippingAmount",
     discounts: "discountAmount",
     trueAov: "aovNeto",
-    averageOrderValue: "aovNeto",
+    averageOrderValue: "averageOrderValue",
     aov: "aovNeto",
     unitsSold: "unitsSold",
     newCustomers: "newCustomers",

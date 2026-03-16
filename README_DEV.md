@@ -22,9 +22,9 @@ docker compose up -d
 
 # 2. Create .env with required keys (see src/env.ts):
 #    DATABASE_URL, REDIS_URL, INTERNAL_API_KEY,
-#    SHOPIFY_SHOP_DOMAIN, SHOPIFY_ADMIN_ACCESS_TOKEN,
-#    SHOP_TIMEZONE_IANA, SHOP_CURRENCY_CODE
+#    SHOPIFY_SHOP_DOMAIN, SHOPIFY_ADMIN_ACCESS_TOKEN
 #    Optional: PORT, SHOPIFY_API_VERSION, SHOPIFY_SYNC_*, SHOPIFY_CLIENT_ID, SHOPIFY_CLIENT_SECRET
+#    (Timezone and currency are fetched from Shopify API at bootstrap; no SHOP_TIMEZONE_IANA / SHOP_CURRENCY_CODE needed.)
 
 # 3. Run migrations
 pnpm run db:migrate
@@ -135,7 +135,7 @@ See **docs/DEPLOYMENT.md** for production checklist: env vars, migrations, boots
 
 ## Store target (hard requirements)
 
-- `SHOPIFY_SHOP_DOMAIN=f4t3-clo.myshopify.com`
+- `SHOPIFY_SHOP_DOMAIN=f4t3-clo.myshopify.com` (timezone/currency come from Shopify at bootstrap)
 - `SHOP_TIMEZONE_IANA=America/Mexico_City`
 - Sync: 30-day initial backfill; overlap 2 days for idempotency.
 - Dashboard series: `days` ∈ {1, 2, 3, 7, 30}; orders with `excluded=true` are not summed.

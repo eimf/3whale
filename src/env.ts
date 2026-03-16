@@ -10,8 +10,6 @@ export const REQUIRED_ENV_KEYS = [
   "INTERNAL_API_KEY",
   "SHOPIFY_SHOP_DOMAIN",
   "SHOPIFY_ADMIN_ACCESS_TOKEN",
-  "SHOP_TIMEZONE_IANA",
-  "SHOP_CURRENCY_CODE",
 ] as const;
 
 /** Optional: used only for OAuth install callback (/auth/callback). */
