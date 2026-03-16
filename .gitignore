@@ -26,6 +26,10 @@ npm-debug.log*
 coverage/
 .nyc_output/
 
+# Python (not used by this project; ignore if present)
+.venv/
+venv/
+
 # Misc
 *.local
 _login/

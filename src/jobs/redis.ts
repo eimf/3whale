@@ -8,12 +8,24 @@ function getRedisUrl(): string {
   return url;
 }
 
-export function getRedisConnectionOptions(): { host: string; port: number; maxRetriesPerRequest: null } {
+export function getRedisConnectionOptions(): {
+  host: string;
+  port: number;
+  password?: string;
+  maxRetriesPerRequest: null;
+} {
   const url = getRedisUrl();
   const u = new URL(url);
-  return {
+  const opts: {
+    host: string;
+    port: number;
+    password?: string;
+    maxRetriesPerRequest: null;
+  } = {
     host: u.hostname,
     port: u.port ? parseInt(u.port, 10) : 6379,
     maxRetriesPerRequest: null,
   };
+  if (u.password) opts.password = u.password;
+  return opts;
 }
