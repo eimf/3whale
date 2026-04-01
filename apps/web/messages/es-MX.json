@@ -158,24 +158,11 @@
         "lastSynced": "Última sincronización",
         "lastSyncedNever": "Nunca",
         "syncNow": "Sincronizar ahora",
-        "fullSync": "Sincronización completa",
-        "fullSyncTitle": "Volver a traer los últimos 90 días desde Shopify para corregir huecos (asegúrate de que el worker esté en ejecución)",
         "syncing": "Sincronizando…",
-        "syncStarted": "Sincronización en curso. Actualiza en un momento.",
-        "fullSyncStarted": "Sincronización completa iniciada. El worker volverá a traer los últimos 90 días.",
-        "fullSyncModal": {
-            "title": "Sincronización completa (reconciliar con Shopify)",
-            "whatItDoes": "Esto hará lo siguiente:",
-            "whatItDoesBullet1": "Borrar la marca de agua del sync para que la próxima ejecución ignore el progreso anterior",
-            "whatItDoesBullet2": "Encolar un trabajo que volverá a traer los últimos 90 días de órdenes desde Shopify",
-            "whatItDoesBullet3": "Actualizar cada orden en esa ventana (corrige datos faltantes o desactualizados por fallos anteriores)",
-            "whatToExpect": "Qué esperar:",
-            "whatToExpectBullet1": "El worker de sync debe estar en ejecución (p. ej. npm run dev:worker); si no, el trabajo no se ejecutará",
-            "whatToExpectBullet2": "El trabajo puede tardar varios minutos según el volumen de órdenes",
-            "whatToExpectBullet3": "Los números del dashboard se actualizarán cuando termine la ejecución — actualiza la página o espera al próximo chequeo de estado",
-            "cancel": "Cancelar",
-            "confirm": "Iniciar sincronización completa"
-        }
+        "syncStarted": "Obteniendo los datos más recientes de Shopify…",
+        "autoSyncInProgress": "Preparando los datos de tu tienda…",
+        "timeout": "La sincronización está tardando más de lo esperado. Asegúrate de que el worker de sync esté en ejecución e inténtalo de nuevo.",
+        "failedGeneric": "La sincronización falló."
     },
     "tiendaHeader": {
         "share": "Compartir o exportar",
