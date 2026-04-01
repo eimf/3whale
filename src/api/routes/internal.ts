@@ -153,23 +153,12 @@ export async function registerInternalRoutes(fastify: FastifyInstance) {
         return reply.send(config);
     });
 
-    /** Enqueue sync job (single-store). Optional ?fullSync=true to reset watermark first for full backfill (90 days). */
-    fastify.post<{ Querystring: { fullSync?: string } }>(
-        "/internal/sync/run",
-        async (req, reply) => {
-            const fullSync =
-                req.query.fullSync === "true" || req.query.fullSync === "1";
-            if (fullSync) {
-                await db
-                    .update(syncState)
-                    .set({ watermarkProcessedAt: null })
-                    .where(eq(syncState.id, "singleton"));
-            }
-            const queue = getSyncQueue();
-            const job = await queue.add(JOB_NAME_SYNC_ORDERS_INCOME_V1, fullSync ? { fullSyncDays: 90 } : {});
-            return reply.send({ jobId: job.id, fullSync });
-        },
-    );
+    /** Enqueue sync job (single-store). Worker runs incremental watermark-based sync. */
+    fastify.post("/internal/sync/run", async (_req, reply) => {
+        const queue = getSyncQueue();
+        const job = await queue.add(JOB_NAME_SYNC_ORDERS_INCOME_V1, {});
+        return reply.send({ jobId: job.id ?? String(job.id) });
+    });
 
     /** Sync status: shop_config, sync_state, last 10 run logs, counts. */
     fastify.get("/internal/sync-status", async (_req, reply) => {

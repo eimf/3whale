@@ -21,7 +21,7 @@ Single store is assumed: `SHOPIFY_SHOP_DOMAIN` + `SHOPIFY_ADMIN_ACCESS_TOKEN`. T
 ## Main flows
 
 1. **Bootstrap** (`POST /internal/bootstrap`): Upserts `shop_config` and ensures `sync_state`. Can use new `fetchShopConfigFromShopify()` to get timezone/currency from Shopify `shop.json` instead of env.
-2. **Sync** (`POST /internal/sync/run`): Enqueues a job; worker pulls orders/refunds (GraphQL), maps to normalized income, writes to `shopify_order_raw`, `order_income_v1`, `order_refund_event_v1`, and run logs. Optional `?fullSync=true` resets watermark and re-fetches last 90 days.
+2. **Sync** (`POST /internal/sync/run`): Enqueues a job; worker pulls orders/refunds (GraphQL), maps to normalized income, writes to `shopify_order_raw`, `order_income_v1`, `order_refund_event_v1`, and run logs. Incremental from `sync_state.watermark_processed_at` (initial backfill window from env when watermark is null).
 3. **Daily income** (`GET /internal/income/daily?days=1|2|3|7|14|30|90|365`): Returns daily series (strings; excluded orders omitted).
 4. **Web app**: Login (JWT + `admin_user` in Postgres), dashboard with charts/sparklines, sync controls, and BFF routes that proxy to the backend using `INTERNAL_API_KEY`.
 

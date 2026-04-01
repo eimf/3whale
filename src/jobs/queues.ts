@@ -8,11 +8,8 @@ import { getRedisConnectionOptions } from "./redis.js";
 
 const QUEUE_NAME = "shopify-sync";
 
-export interface SyncOrdersIncomeV1JobData {
-  /** Single-store: no shop id; processor reads shop_config. */
-  /** When set, full sync uses this many days for backfill (watermark is reset by API before enqueue). */
-  fullSyncDays?: number;
-}
+/** Single-store: job carries no payload; processor reads shop_config. */
+export type SyncOrdersIncomeV1JobData = Record<string, never>;
 
 let queue: Queue<SyncOrdersIncomeV1JobData> | null = null;
 

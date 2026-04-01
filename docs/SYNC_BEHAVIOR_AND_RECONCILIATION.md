@@ -1,4 +1,4 @@
-# Sync behavior: UI vs script, and true reconciliation
+# Sync behavior: UI vs script
 
 ## What the UI “Sync” button does
 
@@ -16,6 +16,8 @@ So:
 - **UI sync** = enqueue job → worker runs `syncOrdersIncomeV1()` (async).
 - **Script sync** (`npx tsx scripts/run-sync-once.ts`) = call `syncOrdersIncomeV1()` **directly** in the script process (sync, no queue).
 
+The web dashboard **polls** `GET /api/sync/status` until the run reaches a terminal state (`success` / `failure`), then refetches income endpoints so cards update without a manual browser refresh. On first visit, it may **auto-sync** once per tab when data looks stale (see `apps/web` dashboard code).
+
 Same logic, different invocation: **queue + worker** vs **direct call**.
 
 ---
@@ -23,13 +25,13 @@ Same logic, different invocation: **queue + worker** vs **direct call**.
 ## Why the UI sync might not update the data
 
 1. **No worker running**  
-   If nothing is running `pnpm run dev:worker`, the job stays in Redis and is never processed. The UI still gets `200` and `{ jobId }`, shows “Sync started”, but no sync runs. This is the most likely reason the data didn’t update when using the UI.
+   If nothing is running `pnpm run dev:worker`, the job stays in Redis and is never processed. The UI still gets `200` and `{ jobId }`, but no sync runs. This is the most likely reason the data did not update when using the UI.
 
-2. **Worker was failing before the fix**  
-   If the worker was running but the job was failing (e.g. `numberOfOrders` string vs number), `last_sync_status` would be `failure` and the watermark wouldn’t advance. The script you ran later bypassed the queue and ran the fixed code directly, so it succeeded.
+2. **Worker was failing**  
+   If the worker was running but the job was failing, `last_sync_status` would be `failure` and the watermark would not advance as expected.
 
-3. **Refresh timing**  
-   The dashboard refetches status and data once after 4 seconds. If the worker is slow or the job runs later, the UI might refresh before the sync finishes, so the numbers don’t change yet.
+3. **Timeout**  
+   If a run takes longer than the dashboard wait window (several minutes), the UI shows a timeout message. Ensure the worker is running and healthy; try Sync again.
 
 **Conclusion:** For the UI “Sync” to actually update data, the **worker must be running** and healthy. The script works without a worker because it runs the sync in-process.
 
@@ -44,58 +46,21 @@ No. Same job name (`syncOrdersIncomeV1`), same queue (`shopify-sync`), same proc
 
 ---
 
-## Current sync semantics (incremental only)
+## Current sync semantics (incremental)
 
 `syncOrdersIncomeV1` is **watermark-based incremental**:
 
 - Reads `watermark_processed_at` from `sync_state`.
 - **Effective window:**
   - If watermark exists: `effectiveWatermark = watermark - OVERLAP_DAYS` (default 2 days).
-  - If no watermark (first run): `effectiveWatermark = now - INITIAL_BACKFILL_DAYS` (default 30 days).
+  - If no watermark (first run): `effectiveWatermark = now - INITIAL_BACKFILL_DAYS` (default 30 days, env `SHOPIFY_INITIAL_BACKFILL_DAYS`).
 - Fetches Shopify orders with:
   - `processed_at:>= effectiveWatermark`
   - `updated_at:>= effectiveWatermark`
   - (two passes for idempotency; overlap avoids gaps.)
 - Advances the watermark to the latest `processed_at`/`updated_at` seen.
 
-It does **not**:
-
-- Re-fetch “all orders” in the store.
-- Compare Shopify vs DB to find missing orders.
-- Guarantee full parity after past failures.
-
-So if the job had been failing for a while, some days were never (or partially) synced. Once the job is fixed, the next run only fetches from `(watermark - 2 days)` onward. If the watermark was already ahead (e.g. from an old successful run), the run may fetch little or nothing new. To “catch up” missing days you had to either reset the watermark (e.g. `scripts/reset-sync-watermark-for-new-metrics.ts`) and run a sync, or run the script (which still uses the same watermark logic unless you reset it first).
-
----
-
-## True reconciliation / full sync
-
-To get **data parity with Shopify** (reconcile all orders, fill gaps from past failures), we need a way to run a **full backfill** over a chosen window instead of only “from watermark onward”.
-
-### Implemented behavior
-
-1. **Full sync (reconcile) trigger**  
-   - Backend: `POST /internal/sync/run?fullSync=true`  
-   - Before enqueuing the job, sets `watermark_processed_at = null` for the singleton `sync_state`.  
-   - Enqueues the job with `fullSyncDays: 90`.  
-   - When the worker runs, it sees no watermark and uses **90 days** for the backfill window (re-fetches and upserts all orders in that window).  
-   - After the run, the watermark is set again as usual.
-
-2. **BFF**  
-   - `POST /api/sync/run` accepts optional query param `fullSync=true` and forwards it to the backend.
-
-3. **UI**  
-   - “Sync now” = incremental (current behavior).  
-   - “Full sync” (or “Reconcile”) = opens a confirmation modal explaining what will happen (watermark reset, 90-day re-fetch, worker requirement) and what to expect (run time, dashboard refresh). On confirm, calls with `fullSync=true` so the next run is a 90-day full backfill.
-
-To reconcile a longer period, run a full sync (90 days) or add a future option to pass a “sync from” date / custom days.
-
-### Operational notes
-
-- **Worker must be running** for enqueued jobs (including full sync) to run.
-- For a one-off full reconciliation without the worker, you can still:
-  1. Run `npx tsx scripts/reset-sync-watermark-for-new-metrics.ts` (or manually set `watermark_processed_at = null`).
-  2. Run `npx tsx scripts/run-sync-once.ts`.
+It does **not** re-fetch the entire store history in one shot. If the job had been failing for a while, some days may be thin until the watermark moves forward. To **re-run a wider backfill** after fixing logic or metrics, reset the watermark (e.g. `scripts/reset-sync-watermark-for-new-metrics.ts` or SQL) and trigger sync again so the next run treats “no watermark” / new window like an initial backfill.
 
 ---
 
@@ -103,9 +68,9 @@ To reconcile a longer period, run a full sync (90 days) or add a future option t
 
 | Question | Answer |
 | -------- | ------ |
-| What does the UI Sync do? | Proxies to `POST /internal/sync/run`, which **enqueues** a `syncOrdersIncomeV1` job. The **worker** runs the sync. |
+| What does the UI Sync do? | Proxies to `POST /internal/sync/run`, which **enqueues** a `syncOrdersIncomeV1` job. The **worker** runs the sync. The UI **polls** status and refetches income when the job completes. |
 | Full or incremental? | **Incremental**: uses `watermark_processed_at` (with overlap / initial backfill). |
 | Same watermark? | Yes. Same `sync_state.watermark_processed_at`; script and worker use the same processor. |
-| Why didn’t UI update data? | Most likely **worker not running**; or job was failing before the schema fix; or UI refreshed before sync finished. |
+| Why did UI not update data? | Most likely **worker not running** or job **failure**; less often **poll timeout** on very long runs. |
 | Different worker/endpoint? | No. Same queue, same job, same processor. |
-| True reconciliation? | Use **Full sync** (reconcile): `fullSync=true` resets the watermark and the next run does a **90-day** full backfill. Ensure the worker is running. |
+| Wider re-backfill? | **Reset watermark** (script/SQL) then run sync; next run uses initial backfill window from env. |
