@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { useTranslations, useLocale } from "next-intl";
 import { setComparing, setTimezoneIana } from "@/store/dashboardSlice";
@@ -40,6 +40,17 @@ import {
     TooltipPortal,
     TooltipContent,
 } from "@/components/ui/tooltip";
+import {
+    DASHBOARD_AUTO_SYNC_SESSION_KEY,
+    SYNC_POLL_INTERVAL_MS,
+    SYNC_WAIT_TIMEOUT_MS,
+    fetchSyncStatus,
+    isDashboardSyncStale,
+    isSyncRunning,
+    refetchDashboardIncome,
+    shouldCooldownEnqueue,
+    waitForSyncTerminal,
+} from "@/lib/dashboardSync";
 
 function ShareIcon() {
     return (
@@ -374,6 +385,9 @@ export default function DashboardPage() {
     const [selectedMetricKey, setSelectedMetricKey] =
         useState<DashboardMetricKey>("orderRevenue");
     const [selectedMetricTitle, setSelectedMetricTitle] = useState("");
+    const dashboardUnmountRef = useRef(false);
+    const syncStatusRef = useRef(syncStatus);
+    syncStatusRef.current = syncStatus;
 
     const rangeParams = useMemo(
         () =>
@@ -438,9 +452,163 @@ export default function DashboardPage() {
     }, [queryString, dispatch]);
 
     useEffect(() => {
+        dashboardUnmountRef.current = false;
+        return () => {
+            dashboardUnmountRef.current = true;
+        };
+    }, []);
+
+    useEffect(() => {
         const tz = syncStatus?.shopConfig?.timezoneIana ?? null;
         if (tz) dispatch(setTimezoneIana(tz));
     }, [syncStatus, dispatch]);
+
+    const runSyncUntilRefresh = useCallback(
+        async (args: {
+            skipPost: boolean;
+            baselineFinishedAt: string | null;
+            isCancelled: () => boolean;
+            startMessage?: string | null;
+        }): Promise<void> => {
+            setSyncing(true);
+            setSyncError(null);
+            if (args.startMessage !== null) {
+                setSyncMessage(
+                    args.startMessage ?? t("sync.syncStarted"),
+                );
+            }
+            const baseline = args.baselineFinishedAt;
+
+            if (!args.skipPost) {
+                const res = await fetch("/api/sync/run", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({}),
+                });
+                const body = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    setSyncError(
+                        typeof body?.error === "string"
+                            ? body.error
+                            : "Error",
+                    );
+                    setSyncMessage(null);
+                    setSyncing(false);
+                    return;
+                }
+            }
+
+            const waitResult = await waitForSyncTerminal({
+                baselineFinishedAt: baseline,
+                pollIntervalMs: SYNC_POLL_INTERVAL_MS,
+                timeoutMs: SYNC_WAIT_TIMEOUT_MS,
+                isCancelled: args.isCancelled,
+            });
+
+            if (!waitResult.completed) {
+                if (waitResult.reason === "cancelled") {
+                    setSyncMessage(null);
+                    setSyncing(false);
+                    return;
+                }
+                setSyncError(t("sync.timeout"));
+                setSyncMessage(null);
+                setSyncing(false);
+                return;
+            }
+
+            setSyncStatus(waitResult.status);
+            if (!waitResult.success) {
+                const err =
+                    waitResult.status.syncState?.lastSyncError ??
+                    t("sync.failedGeneric");
+                setSyncError(err);
+                setSyncMessage(null);
+                setSyncing(false);
+                return;
+            }
+
+            const refreshed = await refetchDashboardIncome({
+                queryString,
+            });
+            if (refreshed.daily) setDailyResponse(refreshed.daily);
+            if (refreshed.summary) setSummary(refreshed.summary);
+            if (refreshed.sync) {
+                setSyncStatus(refreshed.sync);
+                const tz = refreshed.sync.shopConfig?.timezoneIana ?? null;
+                if (tz) dispatch(setTimezoneIana(tz));
+            }
+
+            setSyncMessage(null);
+            setSyncing(false);
+        },
+        [dispatch, queryString, t],
+    );
+
+    useEffect(() => {
+        if (loading || error) return;
+        const statusSnapshot = syncStatusRef.current;
+        if (!statusSnapshot) return;
+        if (typeof sessionStorage === "undefined") return;
+        if (
+            sessionStorage.getItem(DASHBOARD_AUTO_SYNC_SESSION_KEY) === "done"
+        ) {
+            return;
+        }
+        if (
+            sessionStorage.getItem(DASHBOARD_AUTO_SYNC_SESSION_KEY) ===
+            "pending"
+        ) {
+            return;
+        }
+
+        const state = statusSnapshot.syncState;
+        const running = isSyncRunning(state);
+        const stale = isDashboardSyncStale(state);
+
+        if (!stale && !running) return;
+
+        if (
+            !running &&
+            stale &&
+            shouldCooldownEnqueue(state, 120_000)
+        ) {
+            return;
+        }
+
+        sessionStorage.setItem(DASHBOARD_AUTO_SYNC_SESSION_KEY, "pending");
+
+        let cancelled = false;
+        const baseline = state?.lastSyncFinishedAt ?? null;
+        void (async () => {
+            try {
+                await runSyncUntilRefresh({
+                    skipPost: running,
+                    baselineFinishedAt: baseline,
+                    isCancelled: () =>
+                        cancelled || dashboardUnmountRef.current,
+                    startMessage: t("sync.autoSyncInProgress"),
+                });
+            } finally {
+                if (!cancelled) {
+                    sessionStorage.setItem(
+                        DASHBOARD_AUTO_SYNC_SESSION_KEY,
+                        "done",
+                    );
+                }
+            }
+        })();
+
+        return () => {
+            cancelled = true;
+            if (
+                sessionStorage.getItem(DASHBOARD_AUTO_SYNC_SESSION_KEY) ===
+                "pending"
+            ) {
+                sessionStorage.removeItem(DASHBOARD_AUTO_SYNC_SESSION_KEY);
+            }
+        };
+    }, [loading, error, t, runSyncUntilRefresh]);
 
     const data = dailyResponse?.data ?? null;
     const granularity = dailyResponse?.granularity ?? "day";
@@ -474,43 +642,16 @@ export default function DashboardPage() {
         });
     }, [syncStatus, t]);
 
-    async function handleSyncNow(fullSync?: boolean) {
-        setSyncing(true);
-        setSyncMessage(null);
-        setSyncError(null);
-        try {
-            const res = await fetch("/api/sync/run", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ fullSync: fullSync === true }),
-            });
-            const body = await res.json().catch(() => ({}));
-            if (!res.ok) {
-                setSyncError(body?.error ?? "Error");
-                return;
-            }
-            setSyncMessage(
-                fullSync ? t("sync.fullSyncStarted") : t("sync.syncStarted"),
-            );
-            setTimeout(() => {
-                fetch("/api/sync/status")
-                    .then((r) => (r.ok ? r.json() : null))
-                    .then(
-                        (s: SyncStatusResponse | null) => s && setSyncStatus(s),
-                    );
-                fetch(`/api/income/daily?${queryString}`)
-                    .then((r) => (r.ok ? r.json() : null))
-                    .then(
-                        (d: DailyV2Response | null) => d && setDailyResponse(d),
-                    );
-                fetch(`/api/income/summary?${queryString}`)
-                    .then((r) => (r.ok ? r.json() : null))
-                    .then((s: SummaryV2 | null) => s && setSummary(s));
-                setSyncMessage(null);
-            }, 4000);
-        } finally {
-            setSyncing(false);
-        }
+    async function handleSyncNow() {
+        const baseline =
+            syncStatus?.syncState?.lastSyncFinishedAt ??
+            (await fetchSyncStatus())?.syncState?.lastSyncFinishedAt ??
+            null;
+        await runSyncUntilRefresh({
+            skipPost: false,
+            baselineFinishedAt: baseline,
+            isCancelled: () => dashboardUnmountRef.current,
+        });
     }
 
     const drilldownBarsSeries = useMemo(
@@ -847,7 +988,7 @@ export default function DashboardPage() {
                         syncing={syncing}
                         syncMessage={syncMessage}
                         syncError={syncError}
-                        onRefresh={handleSyncNow}
+                        onRefresh={() => void handleSyncNow()}
                     />
                 </div>
             </div>

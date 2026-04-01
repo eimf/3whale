@@ -158,24 +158,11 @@
         "lastSynced": "Last synced",
         "lastSyncedNever": "Never",
         "syncNow": "Sync now",
-        "fullSync": "Full sync",
-        "fullSyncTitle": "Re-fetch last 90 days from Shopify to fix gaps (ensure worker is running)",
         "syncing": "Syncing…",
-        "syncStarted": "Sync in progress. Refresh in a moment.",
-        "fullSyncStarted": "Full sync started. Worker will re-fetch last 90 days.",
-        "fullSyncModal": {
-            "title": "Full sync (reconcile with Shopify)",
-            "whatItDoes": "This will:",
-            "whatItDoesBullet1": "Clear the sync watermark so the next run ignores previous progress",
-            "whatItDoesBullet2": "Enqueue a job that re-fetches the last 90 days of orders from Shopify",
-            "whatItDoesBullet3": "Upsert every order in that window (fixes missing or outdated data from past failures)",
-            "whatToExpect": "What to expect:",
-            "whatToExpectBullet1": "The sync worker must be running (e.g. npm run dev:worker); otherwise the job will not run",
-            "whatToExpectBullet2": "The job may take several minutes depending on order volume",
-            "whatToExpectBullet3": "Dashboard numbers will update after the run finishes — refresh the page or wait for the next status poll",
-            "cancel": "Cancel",
-            "confirm": "Start full sync"
-        }
+        "syncStarted": "Fetching latest data from Shopify…",
+        "autoSyncInProgress": "Getting your store data ready…",
+        "timeout": "Sync is taking longer than expected. Make sure the sync worker is running, then try again.",
+        "failedGeneric": "Sync failed."
     },
     "tiendaHeader": {
         "share": "Share or export",

@@ -173,5 +173,6 @@ export type SyncStatusResponse = {
         lastSyncFinishedAt: string | null;
         lastSyncStatus: string | null;
         lastSyncStartedAt: string | null;
+        lastSyncError?: string | null;
     } | null;
 };
