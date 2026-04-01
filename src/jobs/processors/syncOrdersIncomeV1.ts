@@ -50,19 +50,11 @@ export interface SyncOrdersIncomeV1Result {
     ordersExcluded: number;
 }
 
-export interface SyncOrdersIncomeV1Options {
-    /** When provided and watermark is null, use this many days for initial backfill (e.g. 90 for full sync). */
-    fullSyncDays?: number;
-}
-
 /**
  * Run sync for single store: watermark-based pagination, raw JSONB + normalized NUMERIC rows.
  * Idempotent: overlap days avoid duplicates (upsert by shopifyOrderId).
- * @param options - Optional job data from queue (e.g. fullSyncDays for full reconciliation).
  */
-export async function syncOrdersIncomeV1(
-    options?: SyncOrdersIncomeV1Options,
-): Promise<SyncOrdersIncomeV1Result> {
+export async function syncOrdersIncomeV1(): Promise<SyncOrdersIncomeV1Result> {
     const [config] = await db
         .select()
         .from(shopConfig)
@@ -85,8 +77,7 @@ export async function syncOrdersIncomeV1(
 
     const now = new Date();
     const watermark = state?.watermarkProcessedAt ?? null;
-    const backfillDays =
-        options?.fullSyncDays ?? INITIAL_BACKFILL_DAYS;
+    const backfillDays = INITIAL_BACKFILL_DAYS;
     const effectiveWatermark = watermark
         ? new Date(watermark.getTime() - OVERLAP_DAYS * 24 * 60 * 60 * 1000)
         : new Date(now.getTime() - backfillDays * 24 * 60 * 60 * 1000);

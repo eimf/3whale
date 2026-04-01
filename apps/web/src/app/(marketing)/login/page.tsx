@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { validateEmail, validatePassword, getEmailError, getPasswordError } from "@/lib/auth-validation";
+import { DASHBOARD_AUTO_SYNC_SESSION_KEY } from "@/lib/sync/pollSyncStatus";
 
 const UNKNOWN_MSG = "Unknown error. Please try again.";
 
@@ -41,6 +42,9 @@ export default function LoginPage() {
       if (!res.ok) {
         setError((data.error as string) || UNKNOWN_MSG);
         return;
+      }
+      if (typeof sessionStorage !== "undefined") {
+        sessionStorage.removeItem(DASHBOARD_AUTO_SYNC_SESSION_KEY);
       }
       router.push("/dashboard");
       router.refresh();

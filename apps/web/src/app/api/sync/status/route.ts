@@ -6,6 +6,10 @@
 
 import { NextResponse } from "next/server";
 
+const noStoreJsonHeaders = {
+  "Cache-Control": "private, no-store, max-age=0, must-revalidate",
+} as const;
+
 export async function GET() {
   const baseUrl = process.env.INTERNAL_API_BASE_URL?.trim();
   const apiKey = process.env.INTERNAL_API_KEY?.trim();
@@ -18,6 +22,7 @@ export async function GET() {
 
   const url = `${baseUrl.replace(/\/$/, "")}/internal/sync-status`;
   const res = await fetch(url, {
+    cache: "no-store",
     headers: {
       "x-internal-api-key": apiKey,
     },
@@ -30,5 +35,5 @@ export async function GET() {
       { status: res.status }
     );
   }
-  return NextResponse.json(body, { status: 200 });
+  return NextResponse.json(body, { status: 200, headers: noStoreJsonHeaders });
 }

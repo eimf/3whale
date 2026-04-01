@@ -68,12 +68,8 @@ curl -s http://localhost:3000/internal/health
 curl -s -X POST http://localhost:3000/internal/bootstrap \
   -H "x-internal-api-key: YOUR_INTERNAL_API_KEY"
 
-# Trigger sync (worker will process last 30 days from Shopify)
+# Trigger sync (worker: incremental from watermark, or initial backfill from env)
 curl -s -X POST http://localhost:3000/internal/sync/run \
-  -H "x-internal-api-key: YOUR_INTERNAL_API_KEY"
-
-# Full sync / reconcile: reset watermark then sync (re-fetches last 90 days)
-curl -s -X POST "http://localhost:3000/internal/sync/run?fullSync=true" \
   -H "x-internal-api-key: YOUR_INTERNAL_API_KEY"
 
 # Check sync status and counts
@@ -125,7 +121,7 @@ ADMIN_EMAIL=your@email.com ADMIN_PASSWORD='YourSecurePass1!' pnpm run bootstrap:
 | ------ | ------------------------------------------ | ------------------------------------------------- |
 | GET    | /internal/health                           | No auth; health check                             |
 | POST   | /internal/bootstrap                        | Upsert shop_config from env; ensure sync_state    |
-| POST   | /internal/sync/run                         | Enqueue sync job; returns `{ jobId }`. Optional `?fullSync=true` to reset watermark and re-fetch last 90 days (reconcile). |
+| POST   | /internal/sync/run                         | Enqueue sync job; returns `{ jobId }`. Incremental from watermark (initial backfill per `SHOPIFY_INITIAL_BACKFILL_DAYS`). |
 | GET    | /internal/sync-status                      | shop_config, sync_state, last 10 run logs, counts |
 | GET    | /internal/income/daily?days=1\|2\|3\|7\|30 | Daily income series (strings, excluded=false)     |
 

@@ -1,7 +1,7 @@
 /**
  * BFF: proxies to backend POST /internal/sync/run.
  * Enqueues a sync job; the worker processes it asynchronously.
- * Returns { jobId, fullSync? }. INTERNAL_API_KEY is server-only; never sent to the browser.
+ * Returns { jobId }. INTERNAL_API_KEY is server-only; never sent to the browser.
  */
 
 import { NextResponse } from "next/server";

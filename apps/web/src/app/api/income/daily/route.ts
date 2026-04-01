@@ -11,6 +11,10 @@ import { NextResponse } from "next/server";
 const allowedDays = [1, 2, 3, 7, 14, 30, 90, 365] as const;
 const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
 
+const noStoreJsonHeaders = {
+    "Cache-Control": "private, no-store, max-age=0, must-revalidate",
+} as const;
+
 export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const daysParam = searchParams.get("days");
@@ -76,6 +80,7 @@ export async function GET(request: Request) {
 
     const url = `${baseUrl.replace(/\/$/, "")}/internal/income/daily-v2?${query.toString()}`;
     const res = await fetch(url, {
+        cache: "no-store",
         headers: {
             "x-internal-api-key": apiKey,
         },
@@ -88,5 +93,5 @@ export async function GET(request: Request) {
             { status: res.status },
         );
     }
-    return NextResponse.json(body, { status: 200 });
+    return NextResponse.json(body, { status: 200, headers: noStoreJsonHeaders });
 }

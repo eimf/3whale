@@ -167,6 +167,13 @@ export type DailyV2Response = {
     comparisonRange?: { from: string; to: string };
 };
 
+export type SyncRunLogRow = {
+    startedAt: string;
+    finishedAt?: string | null;
+    status: string;
+    error?: string | null;
+};
+
 export type SyncStatusResponse = {
     shopConfig?: { timezoneIana?: string };
     syncState: {
@@ -175,4 +182,5 @@ export type SyncStatusResponse = {
         lastSyncStartedAt: string | null;
         lastSyncError?: string | null;
     } | null;
+    lastRunLogs?: SyncRunLogRow[];
 };

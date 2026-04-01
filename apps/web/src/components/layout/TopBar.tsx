@@ -3,6 +3,7 @@
 import { useTranslations } from "next-intl";
 import { usePathname, useRouter } from "next/navigation";
 import { LanguageSwitcher } from "./LanguageSwitcher";
+import { DASHBOARD_AUTO_SYNC_SESSION_KEY } from "@/lib/sync/pollSyncStatus";
 
 const ROUTE_TITLE_KEYS: Record<string, string> = {
   "/dashboard": "summary",
@@ -23,6 +24,9 @@ export function TopBar({ currentLocale, onMenuClick }: TopBarProps) {
 
   async function handleLogout() {
     await fetch("/api/auth/logout", { method: "POST" });
+    if (typeof sessionStorage !== "undefined") {
+      sessionStorage.removeItem(DASHBOARD_AUTO_SYNC_SESSION_KEY);
+    }
     router.push("/login");
     router.refresh();
   }

@@ -42,15 +42,16 @@ import {
 } from "@/components/ui/tooltip";
 import {
     DASHBOARD_AUTO_SYNC_SESSION_KEY,
-    SYNC_POLL_INTERVAL_MS,
     SYNC_WAIT_TIMEOUT_MS,
     fetchSyncStatus,
+    refetchDashboardIncome,
+    waitForSyncTerminal,
+} from "@/lib/sync/pollSyncStatus";
+import {
     isDashboardSyncStale,
     isSyncRunning,
-    refetchDashboardIncome,
     shouldCooldownEnqueue,
-    waitForSyncTerminal,
-} from "@/lib/dashboardSync";
+} from "@/lib/sync/syncStatusDerived";
 
 function ShareIcon() {
     return (
@@ -386,6 +387,7 @@ export default function DashboardPage() {
         useState<DashboardMetricKey>("orderRevenue");
     const [selectedMetricTitle, setSelectedMetricTitle] = useState("");
     const dashboardUnmountRef = useRef(false);
+    const syncFlowInFlightRef = useRef(false);
     const syncStatusRef = useRef(syncStatus);
     syncStatusRef.current = syncStatus;
 
@@ -416,15 +418,20 @@ export default function DashboardPage() {
             }
         });
         Promise.all([
-            fetch(`/api/income/daily?${queryString}`).then((res) => {
-                if (!res.ok) return res.json().then((b) => Promise.reject(b));
-                return res.json() as Promise<DailyV2Response>;
-            }),
-            fetch(`/api/income/summary?${queryString}`).then((res) => {
+            fetch(`/api/income/daily?${queryString}`, { cache: "no-store" }).then(
+                (res) => {
+                    if (!res.ok)
+                        return res.json().then((b) => Promise.reject(b));
+                    return res.json() as Promise<DailyV2Response>;
+                },
+            ),
+            fetch(`/api/income/summary?${queryString}`, {
+                cache: "no-store",
+            }).then((res) => {
                 if (!res.ok) return res.json().then((b) => Promise.reject(b));
                 return res.json() as Promise<SummaryV2>;
             }),
-            fetch("/api/sync/status").then((res) => {
+            fetch("/api/sync/status", { cache: "no-store" }).then((res) => {
                 if (!res.ok) return null;
                 return res.json() as Promise<SyncStatusResponse>;
             }),
@@ -470,6 +477,8 @@ export default function DashboardPage() {
             isCancelled: () => boolean;
             startMessage?: string | null;
         }): Promise<void> => {
+            if (syncFlowInFlightRef.current) return;
+            syncFlowInFlightRef.current = true;
             setSyncing(true);
             setSyncError(null);
             if (args.startMessage !== null) {
@@ -482,6 +491,7 @@ export default function DashboardPage() {
             if (!args.skipPost) {
                 const res = await fetch("/api/sync/run", {
                     method: "POST",
+                    cache: "no-store",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({}),
                 });
@@ -494,53 +504,58 @@ export default function DashboardPage() {
                     );
                     setSyncMessage(null);
                     setSyncing(false);
+                    syncFlowInFlightRef.current = false;
                     return;
                 }
             }
 
-            const waitResult = await waitForSyncTerminal({
-                baselineFinishedAt: baseline,
-                pollIntervalMs: SYNC_POLL_INTERVAL_MS,
-                timeoutMs: SYNC_WAIT_TIMEOUT_MS,
-                isCancelled: args.isCancelled,
-            });
+            try {
+                const waitResult = await waitForSyncTerminal({
+                    baselineFinishedAt: baseline,
+                    timeoutMs: SYNC_WAIT_TIMEOUT_MS,
+                    isCancelled: args.isCancelled,
+                });
 
-            if (!waitResult.completed) {
-                if (waitResult.reason === "cancelled") {
+                if (!waitResult.completed) {
+                    if (waitResult.reason === "cancelled") {
+                        setSyncMessage(null);
+                        setSyncing(false);
+                        return;
+                    }
+                    setSyncError(t("sync.timeout"));
                     setSyncMessage(null);
                     setSyncing(false);
                     return;
                 }
-                setSyncError(t("sync.timeout"));
+
+                setSyncStatus(waitResult.status);
+                if (!waitResult.success) {
+                    const err =
+                        waitResult.status.syncState?.lastSyncError ??
+                        waitResult.status.lastRunLogs?.[0]?.error ??
+                        t("sync.failedGeneric");
+                    setSyncError(err);
+                    setSyncMessage(null);
+                    setSyncing(false);
+                    return;
+                }
+
+                const refreshed = await refetchDashboardIncome({
+                    queryString,
+                });
+                if (refreshed.daily) setDailyResponse(refreshed.daily);
+                if (refreshed.summary) setSummary(refreshed.summary);
+                if (refreshed.sync) {
+                    setSyncStatus(refreshed.sync);
+                    const tz = refreshed.sync.shopConfig?.timezoneIana ?? null;
+                    if (tz) dispatch(setTimezoneIana(tz));
+                }
+
                 setSyncMessage(null);
                 setSyncing(false);
-                return;
+            } finally {
+                syncFlowInFlightRef.current = false;
             }
-
-            setSyncStatus(waitResult.status);
-            if (!waitResult.success) {
-                const err =
-                    waitResult.status.syncState?.lastSyncError ??
-                    t("sync.failedGeneric");
-                setSyncError(err);
-                setSyncMessage(null);
-                setSyncing(false);
-                return;
-            }
-
-            const refreshed = await refetchDashboardIncome({
-                queryString,
-            });
-            if (refreshed.daily) setDailyResponse(refreshed.daily);
-            if (refreshed.summary) setSummary(refreshed.summary);
-            if (refreshed.sync) {
-                setSyncStatus(refreshed.sync);
-                const tz = refreshed.sync.shopConfig?.timezoneIana ?? null;
-                if (tz) dispatch(setTimezoneIana(tz));
-            }
-
-            setSyncMessage(null);
-            setSyncing(false);
         },
         [dispatch, queryString, t],
     );
@@ -563,7 +578,7 @@ export default function DashboardPage() {
         }
 
         const state = statusSnapshot.syncState;
-        const running = isSyncRunning(state);
+        const running = isSyncRunning(statusSnapshot);
         const stale = isDashboardSyncStale(state);
 
         if (!stale && !running) return;
